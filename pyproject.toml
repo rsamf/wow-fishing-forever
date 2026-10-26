@@ -1,6 +1,6 @@
 [project]
 name = "wowfish"
-version = "1.0.0a1"
+dynamic = ["version"]
 description = "A vision-based fishing bot for World of Warcraft: Forever"
 readme = "README.md"
 license = "MIT"
@@ -39,11 +39,21 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling>=1.32"]
+requires = ["hatchling>=1.32", "hatch-vcs>=0.5"]
 build-backend = "hatchling.build"
+
+# The version comes from the latest `v*` git tag (e.g. v1.0.0b1 -> 1.0.0b1); untagged commits
+# get a dev version such as 1.0.0b2.dev3+g1a2b3c4.
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0+unknown"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/wowfish"]
+
+[tool.uv]
+# Rebuild the editable install when HEAD or the tags move, so the version stays current.
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
 
 [tool.ruff]
 line-length = 100

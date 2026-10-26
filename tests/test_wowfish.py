@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 import numpy as np
@@ -37,9 +36,8 @@ RATE = DEFAULT_MEL.sample_rate
 
 def test_bundled_assets_load():
     """Every sprite and clip the code expects is shipped and readable; the release check agrees."""
-    version = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["version"]
     check = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "check_release.py"), f"v{version}"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "check_release.py")],
         capture_output=True,
         text=True,
     )

@@ -46,10 +46,13 @@ this automatically.
 - `forever` is the development branch for the rewrite. `main` holds the legacy bot until
   the rewrite fishes end to end.
 - Versions are PEP 440 (`1.0.0a1`, `1.0.0b1`, `1.0.0rc1`, `1.0.0`). Tags are `v` + version.
-- To cut a release: bump `version` in `pyproject.toml`, commit, then
-  `git tag v<version> && git push origin v<version>`. The release workflow verifies the tag
-  matches the version and that the package assets are present, builds three executables,
-  and publishes a GitHub Release (marked prerelease for a/b/rc versions).
+- The version is not written anywhere in the repo. hatch-vcs derives it from the latest git
+  tag when the package is installed: a tagged commit gets exactly that version, later commits
+  get a dev version such as `1.0.0b2.dev3+g1a2b3c4`. `wowfish --version` shows it.
+- To cut a release, tag the commit and push the tag:
+  `git tag v<version> && git push origin v<version>`. The release workflow checks that the
+  package assets are present, builds three executables, and publishes a GitHub Release
+  (marked prerelease for a/b/rc versions).
 
 ## Updating the bundled clips or sprites
 

@@ -22,6 +22,8 @@ jobs:
       WOWFISH_HOME: ${{ github.workspace }}/.wowfish-home
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # hatch-vcs derives the version from tags
 
       - uses: astral-sh/setup-uv@v10.3.0
         with:

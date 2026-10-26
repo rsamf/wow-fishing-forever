@@ -850,7 +850,6 @@ wheels = [
 
 [[package]]
 name = "wowfish"
-version = "1.0.0a1"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
