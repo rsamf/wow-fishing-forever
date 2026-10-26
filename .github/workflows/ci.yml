@@ -59,13 +59,15 @@ jobs:
         run: timeout 15 xvfb-run -a ./dist/wowfish-gui || test $? -eq 124
 
       - name: Smoke executable (Windows)
+        # wowfish-gui.exe is a windowed app: PowerShell only waits for it (and sets
+        # $LASTEXITCODE) when its output is piped.
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           .\dist\wowfish.exe --version; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           .\dist\wowfish.exe doctor;    if ($LASTEXITCODE) { exit $LASTEXITCODE }
           .\dist\wowfish.exe listen --list; if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          .\dist\wowfish-gui.exe --version; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\dist\wowfish-gui.exe --version | Out-Host; if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Upload executable
         if: matrix.python == '3.12'

@@ -67,12 +67,14 @@ jobs:
           mv dist/wowfish-gui "dist/wowfish-gui-${GITHUB_REF_NAME#v}-${{ matrix.target }}"
 
       - name: Smoke and rename (Windows)
+        # wowfish-gui.exe is a windowed app: PowerShell only waits for it (and sets
+        # $LASTEXITCODE) when its output is piped.
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           .\dist\wowfish.exe --version; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           .\dist\wowfish.exe doctor;    if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          .\dist\wowfish-gui.exe --version; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\dist\wowfish-gui.exe --version | Out-Host; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $v = $env:GITHUB_REF_NAME.TrimStart("v")
           Move-Item dist\wowfish.exe "dist\wowfish-$v-${{ matrix.target }}.exe"
           Move-Item dist\wowfish-gui.exe "dist\wowfish-gui-$v-${{ matrix.target }}.exe"
