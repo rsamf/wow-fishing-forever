@@ -25,7 +25,7 @@ jobs:
         with:
           fetch-depth: 0  # hatch-vcs derives the version from tags
 
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
