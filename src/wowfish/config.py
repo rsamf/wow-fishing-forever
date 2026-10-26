@@ -48,7 +48,7 @@ class AudioConfig:
     capture: str = "game"  # "game": the game's own audio stream; "device": the loopback `device`
     device: str = ""
     bite_clip: str = "fishingbobber"
-    bite_threshold: float = 0.68
+    bite_threshold: float = 0.66
     refractory_s: float = 3.0
 
     @property

@@ -37,7 +37,7 @@ class BiteDetector:
         p: MelParams = DEFAULT_MEL,
         *,
         trigger_clips: Sequence[str],
-        threshold: float = 0.68,
+        threshold: float = 0.66,
         refractory_s: float = 3.0,
         min_consecutive: int = 1,
     ) -> None:
