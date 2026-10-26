@@ -13,6 +13,9 @@ datas += copy_metadata("wowfish")
 datas += collect_data_files("soundcard")  # it reads bundled *.py.h headers at import
 datas += collect_data_files("ttkbootstrap")  # themes and icons
 datas += [("../src/wowfish/assets", "wowfish/assets")]
+# Pillow's C extension _imagingtk imports this at load time (ttkbootstrap uses PIL.ImageTk);
+# PyInstaller can't see imports made from C.
+hiddenimports += ["PIL._tkinter_finder"]
 EXCLUDES = ["matplotlib", "torch", "torchvision"]
 
 a = Analysis(

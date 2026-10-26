@@ -52,6 +52,12 @@ jobs:
           ./dist/wowfish listen --list
           ./dist/wowfish-gui --version
 
+      - name: Smoke GUI window (Linux)
+        if: runner.os == 'Linux'
+        # `--version` never loads Tk. Open the real window on a virtual display: it must still be
+        # running when timeout stops it (exit 124); a missing module exits sooner with 1.
+        run: timeout 15 xvfb-run -a ./dist/wowfish-gui || test $? -eq 124
+
       - name: Smoke executable (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
