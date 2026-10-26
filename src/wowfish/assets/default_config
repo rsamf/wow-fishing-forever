@@ -28,7 +28,7 @@ device = ""
 bite_clip = "fishingbobber"
 # Minimum correlation (0..1) with the clip onset to count as a bite. Real bites score
 # 0.72-0.94, the loudest non-bite game sounds about 0.63.
-bite_threshold = 0.68
+bite_threshold = 0.66
 # Ignore further bites for this many seconds after one fires.
 refractory_s = 3.0
 
