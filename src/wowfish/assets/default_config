@@ -40,3 +40,13 @@ pause_min_s = 0.5
 pause_max_s = 2.0
 # How long each key is held down, in milliseconds.
 key_hold_ms = 60
+
+[behavior]
+# Variations so the bot does not keep the exact same rhythm. All of them are off by default.
+# Take a break after fishing for a random number of minutes between these two.
+# 0 = never take a break.
+break_every_min_minutes = 0.0
+break_every_max_minutes = 0.0
+# How long each break lasts, in minutes, picked at random between these two.
+break_min_minutes = 0.0
+break_max_minutes = 0.0

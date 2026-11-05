@@ -1,7 +1,8 @@
-"""Nine checks that protect what the bot actually relies on: the shipped assets, the default
+"""Ten checks that protect what the bot actually relies on: the shipped assets, the default
 config, logging in the console-less GUI executable, that the two detectors say yes to the real
 thing and no to nothing, that the game window is picked correctly from the compositor's
-replies and from macOS's window list, and that macOS listens to BlackHole.
+replies and from macOS's window list, that macOS listens to BlackHole, and that the fishing
+loop varies its rhythm only when the config asks it to.
 
 Everything here runs on bundled files and synthetic signals. No screen, audio device, window
 system, or Tk is touched, so a failure means the code or the assets changed, not the machine.
@@ -9,6 +10,7 @@ system, or Tk is touched, so a failure means the code or the assets changed, not
 
 from __future__ import annotations
 
+import random
 import subprocess
 import sys
 from contextlib import nullcontext
@@ -24,27 +26,29 @@ from wowfish.audio import AudioChunk, devices
 from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
-from wowfish.capture import _quartz, _wayland, _x11
+from wowfish.capture import WindowRef, _quartz, _wayland, _x11
 from wowfish.capture._quartz import frontmost_pid, pick_quartz_window
 from wowfish.capture._wayland import pick_hyprland_window
 from wowfish.cli import _setup_logging
 from wowfish.config import (
     AudioConfig,
+    BehaviorConfig,
     Config,
     GameConfig,
+    RunConfig,
     VisionConfig,
     ensure_config_file,
     load_config,
     save_config,
 )
-from wowfish.engine.engine import unsupported_platform
+from wowfish.engine.engine import FishingEngine, unsupported_platform
 from wowfish.errors import PermissionMissing
-from wowfish.gui.presenter import Presenter
+from wowfish.gui.presenter import Presenter, describe
 from wowfish.input import _quartz as input_quartz
 from wowfish.input import get_input_device
 from wowfish.input._wayland import keycodes_from_keymap
 from wowfish.input.keys import MAC_KEYCODES, SUPPORTED_KEYS
-from wowfish.vision.matcher import IconMatcher
+from wowfish.vision.matcher import IconMatch, IconMatcher
 from wowfish.vision.template import load_icon_templates, template_for_size
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -338,3 +342,86 @@ def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
     p.save_audio_device(p.default_device().id)
     assert (p.cfg.audio.capture, p.cfg.audio.device) == ("device", "BlackHole 16ch")
     assert devices.MAC_NO_GAME_AUDIO not in p.prerequisites()
+
+
+class _Pond:
+    """A game in which every cast lands a bobber that bites at once and Interact clears it.
+    Fills in for the clock, capturer, keyboard, matcher, audio, and detector; time moves only
+    when the engine sleeps."""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+        self.sample_rate = RATE
+        self.bobber = False
+        self.pressed: list[tuple[float, str, float]] = []  # time, key, hold
+
+    def clock(self) -> float:
+        return self.t
+
+    def sleep(self, s: float) -> None:
+        self.t += s
+
+    def open(self, window) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def grab(self, box=None) -> np.ndarray:
+        return np.zeros((10, 10, 3), np.uint8)
+
+    def match(self, frame, region=None, full_width=None) -> IconMatch:
+        return IconMatch(0.9 if self.bobber else 0.0, 5, 5, 4, 1.0)
+
+    def press_key(self, key: str, hold_s: float) -> None:
+        self.pressed.append((self.t, key, hold_s))
+        if key in ("1", "f"):
+            self.bobber = key == "1"
+
+    def is_game_focused(self, window) -> bool:
+        return True
+
+    def read(self, n: int) -> np.ndarray:
+        return np.zeros(n, np.float32)
+
+    def feed(self, chunk) -> list[BiteEvent]:
+        if not self.bobber:
+            return []
+        return [BiteEvent("fishingbobber_1", 0.9, 0.0)]
+
+    def reset(self) -> None:
+        pass
+
+
+def _fish(behavior: BehaviorConfig, minutes: float) -> tuple[_Pond, list[str]]:
+    pond = _Pond()
+    cfg = Config(game=GameConfig(), vision=VisionConfig(), audio=AudioConfig(), behavior=behavior)
+    engine = FishingEngine(
+        cfg, WindowRef("World of Warcraft", None, 0, 0, 10, 10),
+        capturer=pond, input_device=pond, audio_source=pond, detector=pond, matcher=pond,
+        clock=pond.clock, sleep=pond.sleep, rng=random.Random(7), session_s=0,
+    )  # fmt: skip
+    while pond.t < minutes * 60:
+        engine.step()
+    return pond, [describe(e) for e in engine.events.queue]
+
+
+def test_fishing_loop_varies_its_rhythm_only_when_asked():
+    """Out of the box every press holds run.key_hold_ms and nothing but cast and Interact is
+    pressed. Each [behavior] setting, once filled in, shows in the presses:
+    - breaks: after the fishing stretch the loop rests for the whole break
+    """
+    pond, _ = _fish(BehaviorConfig(), 1)
+    assert {k for _, k, _ in pond.pressed} == {"1", "f"}
+    assert {h for *_, h in pond.pressed} == {RunConfig().key_hold_ms / 1000}
+
+    behavior = BehaviorConfig(
+        break_every_min_minutes=1,
+        break_every_max_minutes=1,
+        break_min_minutes=2,
+        break_max_minutes=2,
+    )
+    pond, lines = _fish(behavior, 5)
+    gaps = [b[0] - a[0] for a, b in zip(pond.pressed, pond.pressed[1:], strict=False)]
+    assert max(gaps) >= 120
+    assert any("Taking a 2.0 min break" in line for line in lines)

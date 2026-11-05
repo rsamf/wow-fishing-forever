@@ -37,7 +37,8 @@ this automatically.
                     Windows (user32 + mss), macOS (CoreGraphics window list + mss), stub
       input/        key presses: XTest (python-xlib) or a Wayland virtual keyboard on Linux,
                     SendInput on Windows, Quartz events on macOS, stub elsewhere
-      engine/       the fishing loop: states, events, FishingEngine (injectable collaborators), thread
+      engine/       the fishing loop: states, events, FishingEngine (injectable collaborators),
+                    optional behavior variations, thread
       gui/          Tk-free Presenter (engine thread + setup workers), ttkbootstrap window and pages
     scripts/        release preflight, clip conversion (ffmpeg, dev only)
     packaging/      PyInstaller spec (console `wowfish` and windowed `wowfish-gui`)

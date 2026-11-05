@@ -27,6 +27,7 @@ from wowfish.capture import (
 )
 from wowfish.config import Config
 from wowfish.engine import events as ev
+from wowfish.engine.behavior import Behavior
 from wowfish.engine.state import State
 from wowfish.vision.matcher import IconMatch
 from wowfish.vision.region import Region
@@ -87,6 +88,7 @@ class FishingEngine:
         self._clock = clock
         self._sleep = sleep
         self._rng = rng or random.Random()
+        self.behavior = Behavior(cfg.behavior, self._rng)
         self.session_s = cfg.game.session_minutes * 60.0 if session_s is None else session_s
         self.box_interval_s = box_interval_s
         self.lost_after = lost_after
@@ -134,6 +136,7 @@ class FishingEngine:
         if self.started is None:
             self.started = now
             self._last_audio = now
+            self.behavior.start(now)
         if self._stop:
             self._finish("user")
             return
@@ -337,9 +340,20 @@ class FishingEngine:
 
     def _pause_then_idle(self, did: str) -> None:
         pause = self._rng.uniform(self.cfg.run.pause_min_s, self.cfg.run.pause_max_s)
-        self._change(State.IDLE, did, f"Casting again in {pause:.1f} s")
+        rest = self.behavior.break_s(self._clock())
+        if rest > 0 and self.session_s != 0:  # a break never outlasts the session
+            rest = min(rest, max(0.0, self.session_s - self._elapsed()))
+        if rest > 0:
+            nxt = f"Taking a {rest / 60:.1f} min break, then casting again"
+        else:
+            nxt = f"Casting again in {pause:.1f} s"
+        self._change(State.IDLE, did, nxt)
         self._icon_xy = None
-        remaining = pause
+        self._wait(rest + pause)
+
+    def _wait(self, seconds: float) -> None:
+        """Sleep in short slices so Stop still ends the run promptly."""
+        remaining = seconds
         while remaining > 0 and not self._stop:
             step = min(SLEEP_SLICE_S, remaining)
             self._sleep(step)
