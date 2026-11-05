@@ -9,14 +9,22 @@ from wowfish.config import BehaviorConfig
 
 
 class Behavior:
-    def __init__(self, cfg: BehaviorConfig, rng: random.Random) -> None:
+    def __init__(self, cfg: BehaviorConfig, key_hold_ms: int, rng: random.Random) -> None:
         self.cfg = cfg
+        self._key_hold_ms = key_hold_ms
         self._rng = rng
         self._next_break: float | None = None
 
     def start(self, now: float) -> None:
         """Schedule the first break, counting from the start of the run."""
         self._schedule_break(now)
+
+    def hold_s(self) -> float:
+        """How long to hold the next key down."""
+        jitter = self.cfg.key_hold_jitter_ms
+        if jitter <= 0:
+            return self._key_hold_ms / 1000.0
+        return (self._key_hold_ms + self._rng.uniform(-jitter, jitter)) / 1000.0
 
     def reaction_s(self) -> float:
         """How long to wait between hearing the splash and pressing Interact."""

@@ -414,6 +414,7 @@ def test_fishing_loop_varies_its_rhythm_only_when_asked():
     - breaks: after the fishing stretch the loop rests for the whole break
     - reaction: Interact waits out the reaction time after the splash
     - skipped bites: some splashes get no Interact
+    - key holds: they vary within the jitter
     """
     pond, _ = _fish(BehaviorConfig(), 1)
     assert {k for _, k, _ in pond.pressed} == {"1", "f"}
@@ -427,6 +428,7 @@ def test_fishing_loop_varies_its_rhythm_only_when_asked():
         reaction_min_ms=200,
         reaction_max_ms=400,
         skip_bite_chance=0.3,
+        key_hold_jitter_ms=20,
     )
     pond, lines = _fish(behavior, 5)
     gaps = [b[0] - a[0] for a, b in zip(pond.pressed, pond.pressed[1:], strict=False)]
@@ -437,3 +439,5 @@ def test_fishing_loop_varies_its_rhythm_only_when_asked():
         assert 0.2 - 1e-9 <= t - heard <= 0.4 + 1e-9
     assert 0 < [k for _, k, _ in pond.pressed].count("f") < len(pond.bites)
     assert any("Let this bite go on purpose" in line for line in lines)
+    holds = {h for *_, h in pond.pressed}
+    assert len(holds) > 1 and all(0.04 <= h <= 0.08 for h in holds)

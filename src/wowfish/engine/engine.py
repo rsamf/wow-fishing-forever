@@ -88,7 +88,7 @@ class FishingEngine:
         self._clock = clock
         self._sleep = sleep
         self._rng = rng or random.Random()
-        self.behavior = Behavior(cfg.behavior, self._rng)
+        self.behavior = Behavior(cfg.behavior, cfg.run.key_hold_ms, self._rng)
         self.session_s = cfg.game.session_minutes * 60.0 if session_s is None else session_s
         self.box_interval_s = box_interval_s
         self.lost_after = lost_after
@@ -334,7 +334,7 @@ class FishingEngine:
         return False
 
     def _press(self, key: str, why: str) -> None:
-        self.input.press_key(key, self.cfg.run.key_hold_ms / 1000.0)
+        self.input.press_key(key, self.behavior.hold_s())
         self._emit(ev.KeyPressed(self._t(), key, why))
 
     def _miss(self, did: str) -> None:
