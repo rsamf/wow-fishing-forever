@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 from wowfish import __version__
 from wowfish.commands._common import fail
-from pathlib import Path
-
 
 _STDERR_FORMAT = "<level>{level: <7}</level> {message}"
 _FILE_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <7} | {name}:{line} | {message}"
@@ -28,7 +28,9 @@ def _version_callback(value: bool) -> None:
 
 def _setup_logging(verbose: bool = False) -> Path:
     import sys
+
     from loguru import logger
+
     from wowfish import paths
 
     logger.remove()
