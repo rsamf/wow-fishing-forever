@@ -211,6 +211,14 @@ class Presenter:
         )
         self.reload()
 
+    def save_session_minutes(self, minutes: int) -> None:
+        if minutes < 0:
+            raise ValueError("the time limit must be 0 (forever) or more minutes")
+        self.reload()  # a run may have saved its icon measurement since; keep it
+        if minutes != self.cfg.game.session_minutes:  # saving rewrites the file; skip if unchanged
+            save_config(replace(self.cfg, game=replace(self.cfg.game, session_minutes=minutes)))
+            self.reload()
+
     def audio_devices(self) -> list[Any]:
         """The game's own audio first (default), then the loopback monitors.
 
