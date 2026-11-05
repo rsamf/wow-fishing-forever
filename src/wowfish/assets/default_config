@@ -50,3 +50,7 @@ break_every_max_minutes = 0.0
 # How long each break lasts, in minutes, picked at random between these two.
 break_min_minutes = 0.0
 break_max_minutes = 0.0
+# Wait a random number of milliseconds between these two after hearing the splash, before
+# pressing Interact. Keep it under a second or so, or the fish gets away.
+reaction_min_ms = 0
+reaction_max_ms = 0

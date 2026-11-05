@@ -134,7 +134,7 @@ Or run it from terminal:
 
 While the bot is running, keep the water in view and the game client in focus.
 
-To vary the bot's rhythm, fill in the `[behavior]` section of the config file (`wowfish config --path`): breaks after a stretch of fishing. It is all off by default.
+To vary the bot's rhythm, fill in the `[behavior]` section of the config file (`wowfish config --path`): breaks after a stretch of fishing and a reaction delay before Interact. It is all off by default.
 
 ## Commands
 

@@ -264,6 +264,9 @@ class FishingEngine:
                 self.stats.bites_heard + 1, self._elapsed(),
             )  # fmt: skip
             self._emit(ev.BiteHeard(self._t(), bite.clip, float(bite.score)))
+            self._wait(self.behavior.reaction_s())
+            if self._stop:
+                return
             if self.input.is_game_focused(self.window) is False:
                 self._resume_state = State.WAIT_BITE
                 self.state = State.PAUSED
@@ -271,7 +274,7 @@ class FishingEngine:
                 return
             key = self.cfg.game.interact_key
             self._press(key, "bite")
-            self._t_interact = now
+            self._t_interact = self._clock()
             self._last_box_grab = -math.inf
             self._change(
                 State.INTERACT,

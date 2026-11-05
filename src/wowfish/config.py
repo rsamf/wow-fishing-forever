@@ -72,6 +72,8 @@ class BehaviorConfig:
     break_every_max_minutes: float = 0.0  # 0 = never take a break
     break_min_minutes: float = 0.0
     break_max_minutes: float = 0.0
+    reaction_min_ms: int = 0
+    reaction_max_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -181,6 +183,7 @@ def _validate(path: Path, cfg: Config) -> None:
     for lo, hi in (
         ("break_every_min_minutes", "break_every_max_minutes"),
         ("break_min_minutes", "break_max_minutes"),
+        ("reaction_min_ms", "reaction_max_ms"),
     ):
         check(getattr(b, lo) >= 0, f"behavior.{lo}", "must be 0 or positive")
         check(getattr(b, lo) <= getattr(b, hi), f"behavior.{lo}", f"must not exceed behavior.{hi}")

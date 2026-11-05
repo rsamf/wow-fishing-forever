@@ -18,6 +18,13 @@ class Behavior:
         """Schedule the first break, counting from the start of the run."""
         self._schedule_break(now)
 
+    def reaction_s(self) -> float:
+        """How long to wait between hearing the splash and pressing Interact."""
+        lo, hi = self.cfg.reaction_min_ms, self.cfg.reaction_max_ms
+        if hi <= 0:
+            return 0.0
+        return self._rng.uniform(lo, hi) / 1000.0
+
     def break_s(self, now: float) -> float:
         """Seconds to rest now: 0 until the next break is due, which is then scheduled from
         the end of this one."""
