@@ -20,3 +20,6 @@ images/
 # Process docs are never committed
 superpowers/
 .superpowers/
+
+# Playwright
+.playwright-mcp/
