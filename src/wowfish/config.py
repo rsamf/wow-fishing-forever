@@ -74,6 +74,7 @@ class BehaviorConfig:
     break_max_minutes: float = 0.0
     reaction_min_ms: int = 0
     reaction_max_ms: int = 0
+    skip_bite_chance: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -187,6 +188,7 @@ def _validate(path: Path, cfg: Config) -> None:
     ):
         check(getattr(b, lo) >= 0, f"behavior.{lo}", "must be 0 or positive")
         check(getattr(b, lo) <= getattr(b, hi), f"behavior.{lo}", f"must not exceed behavior.{hi}")
+    check(0.0 <= b.skip_bite_chance < 1.0, "behavior.skip_bite_chance", "must be in [0, 1)")
 
 
 def to_toml(cfg: Config) -> str:

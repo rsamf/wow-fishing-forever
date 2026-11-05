@@ -264,6 +264,9 @@ class FishingEngine:
                 self.stats.bites_heard + 1, self._elapsed(),
             )  # fmt: skip
             self._emit(ev.BiteHeard(self._t(), bite.clip, float(bite.score)))
+            if self.behavior.skip_bite():
+                self._miss("Let this bite go on purpose")
+                return
             self._wait(self.behavior.reaction_s())
             if self._stop:
                 return

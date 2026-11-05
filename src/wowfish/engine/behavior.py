@@ -25,6 +25,9 @@ class Behavior:
             return 0.0
         return self._rng.uniform(lo, hi) / 1000.0
 
+    def skip_bite(self) -> bool:
+        return self._chance(self.cfg.skip_bite_chance)
+
     def break_s(self, now: float) -> float:
         """Seconds to rest now: 0 until the next break is due, which is then scheduled from
         the end of this one."""
@@ -37,3 +40,6 @@ class Behavior:
     def _schedule_break(self, after: float) -> None:
         lo, hi = self.cfg.break_every_min_minutes, self.cfg.break_every_max_minutes
         self._next_break = None if hi <= 0 else after + self._rng.uniform(lo, hi) * 60.0
+
+    def _chance(self, p: float) -> bool:
+        return p > 0 and self._rng.random() < p
