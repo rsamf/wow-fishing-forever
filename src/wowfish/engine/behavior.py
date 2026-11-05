@@ -36,6 +36,9 @@ class Behavior:
     def skip_bite(self) -> bool:
         return self._chance(self.cfg.skip_bite_chance)
 
+    def jump(self) -> bool:
+        return self._chance(self.cfg.jump_chance)
+
     def break_s(self, now: float) -> float:
         """Seconds to rest now: 0 until the next break is due, which is then scheduled from
         the end of this one."""

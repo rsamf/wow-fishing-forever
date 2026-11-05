@@ -42,6 +42,7 @@ LISTEN_EVERY_S = 2.0  # while waiting for the splash, say what is heard this oft
 SCORES_EVERY_S = 0.1  # ...and send each clip's peak score this often, for the GUI's graph
 SLEEP_SLICE_S = 0.1
 RESWEEP_AFTER_TIMEOUTS = 2  # icon timeouts in a row before the next cast measures the icon again
+JUMP_LANDING_S = (1.0, 1.5)  # Fishing cannot be cast mid-air; wait this long after a jump
 
 
 class FishingEngine:
@@ -193,6 +194,12 @@ class FishingEngine:
                 self._sweeping = True  # the window changed size: measure the icon again
             if found is not None:
                 self.window = found
+        if self.behavior.jump():
+            self._press(self.cfg.behavior.jump_key, "jump")
+            self._wait(self._rng.uniform(*JUMP_LANDING_S))
+            if self._stop or self.input.is_game_focused(self.window) is False:
+                return  # the next step stops or pauses before anything else is pressed
+            now = self._clock()
         key = self.cfg.game.cast_key
         self._press(key, "cast")
         self.stats = ev.Stats(
