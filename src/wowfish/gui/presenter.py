@@ -155,7 +155,7 @@ class Presenter:
         list_devices: Callable[[], list[Any]] | None = None,
         open_capture: Callable[..., Any] | None = None,
         find_window: Callable[..., Any] | None = None,
-        get_capturer: Callable[[], Any] | None = None,
+        get_capturer: Callable[..., Any] | None = None,
     ) -> None:
         from wowfish.audio.devices import GAME, GAME_CHOICE, LoopbackDevice, list_loopback_devices
         from wowfish.audio.devices import open_capture as real_open
@@ -409,7 +409,7 @@ class Presenter:
             window = self._find_window("World of Warcraft")
             if window is None:
                 raise RuntimeError("World of Warcraft window not found; is the game running?")
-            cap = self._get_capturer()
+            cap = self._get_capturer(window)
             cap.open(window)
             try:
                 frame = cap.grab()

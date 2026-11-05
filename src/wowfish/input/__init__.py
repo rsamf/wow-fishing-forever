@@ -18,9 +18,14 @@ class InputDevice(Protocol):
         ...
 
 
-def get_input_device() -> InputDevice:
+def get_input_device(window: WindowRef | None = None) -> InputDevice:
+    """Key presses for `window`: a native Wayland window needs the compositor's virtual keyboard."""
     import sys
 
+    if window is not None and window.compositor:
+        from wowfish.input._wayland import WaylandInputDevice
+
+        return WaylandInputDevice()
     if linux_x11():
         from wowfish.input._x11 import X11InputDevice
 

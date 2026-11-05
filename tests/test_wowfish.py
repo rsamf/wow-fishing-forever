@@ -1,6 +1,7 @@
-"""Six checks that protect what the bot actually relies on: the shipped assets, the default
-config, logging in the console-less GUI executable, and that the two detectors say yes to the
-real thing and no to nothing.
+"""Seven checks that protect what the bot actually relies on: the shipped assets, the default
+config, logging in the console-less GUI executable, that the two detectors say yes to the real
+thing and no to nothing, and that a native Wayland game window is read correctly from the
+compositor's replies.
 
 Everything here runs on bundled files and synthetic signals. No screen, audio device, window
 system, or Tk is touched, so a failure means the code or the assets changed, not the machine.
@@ -20,6 +21,7 @@ from wowfish.audio import AudioChunk
 from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
+from wowfish.capture._wayland import pick_hyprland_window
 from wowfish.cli import _setup_logging
 from wowfish.config import (
     AudioConfig,
@@ -30,6 +32,7 @@ from wowfish.config import (
     load_config,
     save_config,
 )
+from wowfish.input._wayland import keycodes_from_keymap
 from wowfish.vision.matcher import IconMatcher
 from wowfish.vision.template import load_icon_templates, template_for_size
 
@@ -148,3 +151,65 @@ def test_icon_matcher_finds_sprite_and_rejects_water():
 
             miss = IconMatcher(t).match(water)
             assert not miss.accepted(threshold), (frame_w, size, miss)
+
+
+KEYMAP = """xkb_keymap {
+xkb_keycodes "evdev" {
+	minimum = 8;
+	maximum = 255;
+	<AE01> = 10;
+	<AC04> = 41;
+	<RTRN> = 36;
+	<FK01> = 67;
+	alias <LatF> = <AC04>;
+};
+xkb_types "complete" { type "ONE_LEVEL" { modifiers= none; }; };
+xkb_symbols "pc+fr" {
+%s};
+};
+"""
+NAMED_SYMBOLS = """\tkey <AE01> {\t[ ampersand, 1 ] };
+\tkey <LatF> {\t[ f, F ] };
+\tkey <RTRN> {\t[ Return ] };
+\tkey <FK01> {
+\t\ttype= "CTRL+ALT",
+\t\tsymbols[Group1]= [ F1, F1, F1, F1, XF86Switch_VT_1 ]
+\t};
+"""
+HEX_SYMBOLS = """\tkey <AE01> {\t[ 0x26, 0x31 ] };
+\tkey <LatF> {\t[ 0x66, 0x46 ] };
+\tkey <RTRN> {\t[ 0xff0d ] };
+\tkey <FK01> {
+\t\ttype= "CTRL+ALT",
+\t\tsymbols[1]= [ 0xffbe, 0xffbe, 0xffbe, 0xffbe, 0x1008fe01 ]
+\t};
+"""
+
+
+def test_wayland_window_and_keys_from_compositor_replies():
+    """Hyprland reports logical geometry; the window comes back sized in its output's pixels,
+    and the largest title match wins. Each key resolves to its evdev keycode (xkb code - 8)
+    whether the keymap names keysyms (xkbcommon) or writes them in hex (Hyprland), through
+    aliases and from a shifted level (the digits on AZERTY)."""
+
+    def client(address, title, at, size, monitor):
+        return {"address": address, "title": title, "pid": 42, "at": at, "size": size,
+                "monitor": monitor, "mapped": True, "hidden": False}  # fmt: skip
+
+    clients = [
+        client("0x1f", "World of Warcraft - Wowhead", [0, 0], [800, 600], 0),
+        client("0x2a", "World of Warcraft", [2560, 0], [3200, 1800], 1),
+        client("0x3b", "Discord", [0, 0], [3840, 2160], 0),
+    ]
+    monitors = [{"id": 0, "scale": 1.0}, {"id": 1, "scale": 1.2}]
+    w = pick_hyprland_window(clients, monitors, "world of warcraft")
+    assert w is not None
+    assert (w.title, w.pid, w.left, w.top, w.width, w.height) == (
+        "World of Warcraft", 42, 2560, 0, 3840, 2160,
+    )  # fmt: skip
+    assert (w.handle, w.compositor, w.scale) == (0x2A, "hyprland", 1.2)
+    assert pick_hyprland_window(clients, monitors, "Hearthstone") is None
+
+    for symbols in (NAMED_SYMBOLS, HEX_SYMBOLS):
+        codes = keycodes_from_keymap(KEYMAP % symbols)
+        assert codes == {"1": 2, "f": 33, "enter": 28, "f1": 59}, symbols

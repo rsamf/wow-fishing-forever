@@ -16,7 +16,7 @@ import numpy as np
 
 from wowfish.audio import AudioChunk
 from wowfish.audio._threaded import ThreadedSource
-from wowfish.capture import Box, WindowRef, find_window, get_capturer, linux_x11
+from wowfish.capture import Box, WindowRef, find_window, get_capturer, linux_hyprland, linux_x11
 from wowfish.config import Config
 from wowfish.engine import events as ev
 from wowfish.engine.state import State
@@ -115,6 +115,9 @@ class FishingEngine:
                     self.step()
         finally:
             self.capturer.close()
+            close_input = getattr(self.input, "close", None)  # e.g. a Wayland virtual keyboard
+            if close_input is not None:
+                close_input()
 
     def step(self) -> None:
         if self.state is State.STOPPED:
@@ -415,15 +418,21 @@ def _thumbnail(frame: np.ndarray, x: int, y: int, size: int) -> tuple[np.ndarray
 
 
 def unsupported_platform() -> str:
-    """Why the bot cannot run here, or "" when it can (X11/Xwayland on Linux, or Windows)."""
+    """Why the bot cannot run here, or "" when it can (Linux X11/Xwayland/Hyprland, or Windows)."""
     import os
     import sys
 
-    if sys.platform == "win32" or linux_x11():
+    if sys.platform == "win32" or linux_x11() or linux_hyprland():
         return ""
     if sys.platform == "linux" and not os.environ.get("DISPLAY"):
-        return "DISPLAY is not set; the bot needs X11 or Xwayland (log into a session with one)"
-    return "the bot is not supported yet on this platform (Linux X11/Xwayland and Windows only)"
+        return (
+            "DISPLAY is not set; the bot needs X11, Xwayland, or Hyprland "
+            "(log into a session with one)"
+        )
+    return (
+        "the bot is not supported yet on this platform "
+        "(Linux X11/Xwayland/Hyprland and Windows only)"
+    )
 
 
 def build_engine(
@@ -481,8 +490,8 @@ def build_engine(
     return FishingEngine(
         cfg,
         window,
-        capturer=get_capturer(),
-        input_device=get_input_device(),
+        capturer=get_capturer(window),
+        input_device=get_input_device(window),
         audio_source=audio,
         detector=detector,
         matcher_factory=matcher_factory,

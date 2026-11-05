@@ -16,11 +16,13 @@ Box = tuple[int, int, int, int]  # x, y, width, height in window pixels
 class WindowRef:
     title: str
     pid: int | None
-    left: int
+    left: int  # screen position; logical (unscaled) pixels for a Wayland window
     top: int
-    width: int
+    width: int  # size of a grab, in pixels
     height: int
     handle: int | None = None  # native window id where the platform has one
+    compositor: str | None = None  # "hyprland" for a native Wayland window, else None
+    scale: float = 1.0  # the Wayland output's scale: grab pixels per logical pixel
 
 
 @runtime_checkable
@@ -38,12 +40,25 @@ def linux_x11() -> bool:
     return sys.platform == "linux" and bool(os.environ.get("DISPLAY"))
 
 
+def linux_hyprland() -> bool:
+    return sys.platform == "linux" and bool(os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"))
+
+
 def find_window(title_substring: str = "World of Warcraft") -> WindowRef | None:
-    """The largest viewable window whose title contains the text (X11, Windows; else None)."""
+    """The largest viewable window whose title contains the text.
+
+    X11/Xwayland first, then native Wayland windows on Hyprland, then Windows; else None.
+    """
     if linux_x11():
         from wowfish.capture._x11 import find_window_x11
 
-        return find_window_x11(title_substring)
+        found = find_window_x11(title_substring)
+        if found is not None:
+            return found
+    if linux_hyprland():
+        from wowfish.capture._wayland import find_window_hyprland
+
+        return find_window_hyprland(title_substring)
     if sys.platform == "win32":
         from wowfish.capture import _win32
 
@@ -51,7 +66,11 @@ def find_window(title_substring: str = "World of Warcraft") -> WindowRef | None:
     return None
 
 
-def get_capturer() -> Capturer:
+def get_capturer(window: WindowRef | None = None) -> Capturer:
+    if window is not None and window.compositor:
+        from wowfish.capture._wayland import GrimCapturer
+
+        return GrimCapturer()
     if linux_x11():
         from wowfish.capture._x11 import X11WindowCapturer
 
@@ -67,4 +86,12 @@ def get_capturer() -> Capturer:
     return MssCapturer()
 
 
-__all__ = ["Box", "Capturer", "WindowRef", "find_window", "get_capturer", "linux_x11"]
+__all__ = [
+    "Box",
+    "Capturer",
+    "WindowRef",
+    "find_window",
+    "get_capturer",
+    "linux_hyprland",
+    "linux_x11",
+]
