@@ -25,6 +25,7 @@ from wowfish.input import keys
 
 GAME_TITLE = "World of Warcraft"
 BLOCK = 1024
+CALIBRATE_WATCH_S = 30.0  # how long the calibration keeps grabbing frames for the gear icon
 
 
 def describe(event: ev.Event) -> str:
@@ -116,6 +117,9 @@ class View:
     new_lines: list[str] = field(default_factory=list)
     log_events: list[object] = field(default_factory=list)
     trace: ScoreTrace = field(default_factory=ScoreTrace)
+    listening: bool = False  # the meter or the bite recording is reading audio
+    verify_status: str = ""  # what the bite recording is doing; empty when idle
+    calibrate_status: str = ""  # what the calibration is doing; empty when idle
 
 
 class _Meter:
@@ -184,6 +188,10 @@ class Presenter:
         self._before_pause: tuple[str, str, str] | None = None
         self.last_calibration: CalibrateDone | None = None
         self.trace = ScoreTrace()
+        # Written by the setup workers, read by the GUI tick.
+        self.verify_status = ""
+        self.calibrate_status = ""
+        self._record_level: float | None = None
 
     # -- config -----------------------------------------------------------------------------
 
@@ -334,6 +342,9 @@ class Presenter:
         return View(
             self.state, self.did, self.next, self.stats, self.thumbnail_png, self.running,
             self.level_dbfs, self.last_scores, lines, items, self.trace,
+            listening=self.meter_running or self._record_level is not None,
+            verify_status=self.verify_status,
+            calibrate_status=self.calibrate_status,
         )  # fmt: skip
 
     def _add_scores(self, event: ev.Scores) -> None:
@@ -405,26 +416,41 @@ class Presenter:
         from wowfish.vision.calibrate import calibrate_icon_scale
         from wowfish.vision.template import load_icon_templates
 
+        result: object
         try:
+            self.calibrate_status = "Finding the game window..."
             window = self._find_window("World of Warcraft")
             if window is None:
                 raise RuntimeError("World of Warcraft window not found; is the game running?")
             cap = self._get_capturer(window)
             cap.open(window)
+            templates = load_icon_templates()
+            deadline = time.monotonic() + CALIBRATE_WATCH_S
             try:
-                frame = cap.grab()
+                while True:  # until a frame shows the gear, so there is time to go and cast
+                    left = max(0.0, deadline - time.monotonic())
+                    self.calibrate_status = (
+                        f"Watching the game for the gold gear icon ({left:.0f} s left). "
+                        "Cast now and keep the game on screen."
+                    )
+                    frame = cap.grab()
+                    cal = calibrate_icon_scale(
+                        frame, templates, match_width=self.cfg.vision.match_width
+                    )
+                    if cal.valid or time.monotonic() >= deadline:
+                        break
             finally:
                 cap.close()
-            cal = calibrate_icon_scale(
-                frame, load_icon_templates(), match_width=self.cfg.vision.match_width
-            )
             thumb, scale = image.thumbnail(frame)
             side = max(2, round(cal.icon_size_px * scale))
             box = (round(cal.x * scale - side / 2), round(cal.y * scale - side / 2), side, side)
             png = image.bgr_to_png_bytes(image.with_box(thumb, box) if cal.valid else thumb)
-            self._results.put(CalibrateDone(cal, png))
+            result = CalibrateDone(cal, png)
         except Exception as e:
-            self._results.put(WorkerFailed("calibrate", str(e)))
+            result = WorkerFailed("calibrate", str(e))
+        finally:
+            self.calibrate_status = ""  # before the result, so the result's words stay up
+        self._results.put(result)
 
     def record_and_verify(self, seconds: float = 60.0, selector: str | None = None) -> None:
         threading.Thread(
@@ -437,17 +463,30 @@ class Presenter:
         from wowfish.audio.verify import bite_report, score_recording
         from wowfish.audio.wav import write_wav
 
+        result: object
         try:
+            self.verify_status = "Opening the game's audio..."
             source = self._open_audio(selector)
             chunks: list[np.ndarray] = []
             frames = 0
             with source:
-                while frames < seconds * source.sample_rate:
+                total = int(seconds * source.sample_rate)
+                while frames < total:
                     samples = source.read(BLOCK)
                     chunks.append(samples)
                     frames += len(samples)
+                    if len(samples):
+                        rms = float(np.sqrt(np.mean(np.square(samples))))
+                        self._record_level = 20.0 * np.log10(rms + 1e-9)
+                    left = (total - frames) / source.sample_rate
+                    self.verify_status = (
+                        f"Recording: {left:.0f} s left. "
+                        "Fish by hand in the game until a fish bites."
+                    )
                     if getattr(source, "exhausted", False):
                         break
+            self._record_level = None
+            self.verify_status = "Recorded; looking for the splash..."
             y = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
             folder = paths.config_file().parent / "recordings"
             folder.mkdir(parents=True, exist_ok=True)
@@ -456,12 +495,18 @@ class Presenter:
             fps = build_fingerprints()
             scores = score_recording(y, source.sample_rate, fps, DEFAULT_MEL)
             report = bite_report(scores, fps, DEFAULT_MEL)
-            self._results.put(VerifyDone(report, path))
+            result = VerifyDone(report, path)
         except Exception as e:
-            self._results.put(WorkerFailed("verify the bite", str(e)))
+            result = WorkerFailed("verify the bite", str(e))
+        finally:
+            self._record_level = None
+            self.verify_status = ""  # before the result, so the result's words stay up
+        self._results.put(result)
 
     @property
     def level_dbfs(self) -> float:
+        if self._record_level is not None:
+            return self._record_level
         return self._meter.level_dbfs if self._meter is not None else -120.0
 
     @property
