@@ -34,7 +34,8 @@ def _setup_logging(verbose: bool = False) -> Path:
     from wowfish import paths
 
     logger.remove()
-    logger.add(sys.stderr, level="DEBUG" if verbose else "INFO", format=_STDERR_FORMAT)
+    if sys.stderr is not None:  # None in the console-less wowfish-gui.exe on Windows
+        logger.add(sys.stderr, level="DEBUG" if verbose else "INFO", format=_STDERR_FORMAT)
     log_path = paths.log_file()
     logger.add(log_path, level="DEBUG", format=_FILE_FORMAT, rotation="5 MB", retention=3)
     return log_path

@@ -1,5 +1,6 @@
-"""Five checks that protect what the bot actually relies on: the shipped assets, the default
-config, and that the two detectors say yes to the real thing and no to nothing.
+"""Six checks that protect what the bot actually relies on: the shipped assets, the default
+config, logging in the console-less GUI executable, and that the two detectors say yes to the
+real thing and no to nothing.
 
 Everything here runs on bundled files and synthetic signals. No screen, audio device, window
 system, or Tk is touched, so a failure means the code or the assets changed, not the machine.
@@ -12,12 +13,14 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from loguru import logger
 
 from wowfish.assets import CLIP_NAMES, ICON_SIZES
 from wowfish.audio import AudioChunk
 from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent
 from wowfish.audio.features import DEFAULT_MEL
+from wowfish.cli import _setup_logging
 from wowfish.config import (
     AudioConfig,
     Config,
@@ -59,6 +62,19 @@ def test_default_config_matches_code_defaults(tmp_path):
 
     save_config(from_file, path)
     assert load_config(path) == (from_file, [])
+
+
+def test_logging_works_without_stderr(tmp_path, monkeypatch):
+    """wowfish-gui.exe is built without a console, so on Windows Python sets sys.stderr to None.
+    Logging setup must not crash there, and the log file must still be written."""
+    monkeypatch.setenv("WOWFISH_HOME", str(tmp_path))
+    monkeypatch.setattr(sys, "stderr", None)
+    try:
+        log_path = _setup_logging()
+        logger.info("started without a console")
+    finally:
+        logger.remove()  # closes the file sink so tmp_path can be deleted on Windows
+    assert "started without a console" in log_path.read_text()
 
 
 def _hear(stream: np.ndarray, **kwargs) -> list[BiteEvent]:
