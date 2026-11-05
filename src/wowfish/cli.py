@@ -6,6 +6,11 @@ import typer
 
 from wowfish import __version__
 from wowfish.commands._common import fail
+from pathlib import Path
+
+
+_STDERR_FORMAT = "<level>{level: <7}</level> {message}"
+_FILE_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <7} | {name}:{line} | {message}"
 
 app = typer.Typer(
     name="wowfish",
@@ -21,6 +26,18 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _setup_logging(verbose: bool = False) -> Path:
+    import sys
+    from loguru import logger
+    from wowfish import paths
+
+    logger.remove()
+    logger.add(sys.stderr, level="DEBUG" if verbose else "INFO", format=_STDERR_FORMAT)
+    log_path = paths.log_file()
+    logger.add(log_path, level="DEBUG", format=_FILE_FORMAT, rotation="5 MB", retention=3)
+    return log_path
+
+
 @app.callback()
 def _root(
     version: bool = typer.Option(
@@ -32,9 +49,7 @@ def _root(
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
 ) -> None:
-    from wowfish.logging import setup_logging
-
-    setup_logging(verbose=verbose)
+    _setup_logging(verbose=verbose)
 
 
 def main() -> None:
