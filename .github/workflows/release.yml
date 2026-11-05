@@ -57,6 +57,26 @@ jobs:
         # running when timeout stops it (exit 124); a missing module exits sooner with 1.
         run: timeout 15 xvfb-run -a ./dist/wowfish-gui || test $? -eq 124
 
+      - name: Smoke GUI window (Windows)
+        # Open the real window: unlike `--version` it runs logging setup with no console. A crash
+        # here doesn't exit, PyInstaller shows a blocking "Unhandled exception in script" dialog
+        # instead, so wait for the app's own window title rather than for the process to live.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Start-Process .\dist\wowfish-gui.exe
+          $title = ''
+          for ($i = 0; $i -lt 30 -and $title -notlike 'wowfish *'; $i++) {
+            Start-Sleep 1
+            $title = (Get-Process wowfish-gui -ErrorAction SilentlyContinue |
+              Where-Object MainWindowTitle | Select-Object -First 1).MainWindowTitle
+          }
+          Get-Process wowfish-gui -ErrorAction SilentlyContinue | Stop-Process -Force
+          if ($title -notlike 'wowfish *') {
+            Write-Error "wowfish-gui.exe never opened its window (last window title: '$title')"
+            exit 1
+          }
+
       - name: Smoke and rename (POSIX)
         if: runner.os != 'Windows'
         run: |
