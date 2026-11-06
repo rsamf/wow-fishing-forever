@@ -7,6 +7,9 @@ cast_key = "1"
 interact_key = "f"
 # Stop fishing after this many minutes. Set to 0 to run Forever!
 session_minutes = 0
+# Keybind of an action bar macro containing /quit. When session_minutes runs out, the bot
+# presses it so the game logs out and closes. Empty = leave the game running.
+quit_key = ""
 
 [vision]
 # On-screen size of the interact icon in pixels. 0 = not calibrated; `wowfish calibrate` sets it.

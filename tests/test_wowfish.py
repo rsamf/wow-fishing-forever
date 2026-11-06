@@ -1,8 +1,8 @@
-"""Ten checks that protect what the bot actually relies on: the shipped assets, the default
+"""Eleven checks that protect what the bot actually relies on: the shipped assets, the default
 config, logging in the console-less GUI executable, that the two detectors say yes to the real
 thing and no to nothing, that the game window is picked correctly from the compositor's
 replies and from macOS's window list, that macOS listens to BlackHole, and that the fishing
-loop varies its rhythm only when the config asks it to.
+loop varies its rhythm, or quits the game when time is up, only when the config asks it to.
 
 Everything here runs on bundled files and synthetic signals. No screen, audio device, window
 system, or Tk is touched, so a failure means the code or the assets changed, not the machine.
@@ -42,6 +42,7 @@ from wowfish.config import (
     save_config,
 )
 from wowfish.engine.engine import FishingEngine, unsupported_platform
+from wowfish.engine.state import State
 from wowfish.errors import PermissionMissing
 from wowfish.gui.presenter import Presenter, describe
 from wowfish.input import _quartz as input_quartz
@@ -353,6 +354,7 @@ class _Pond:
         self.t = 0.0
         self.sample_rate = RATE
         self.bobber = False
+        self.focused = True
         self.pressed: list[tuple[float, str, float]] = []  # time, key, hold
         self.bites: list[float] = []
 
@@ -380,7 +382,7 @@ class _Pond:
             self.bobber = key == "1"
 
     def is_game_focused(self, window) -> bool:
-        return True
+        return self.focused
 
     def read(self, n: int) -> np.ndarray:
         return np.zeros(n, np.float32)
@@ -395,15 +397,20 @@ class _Pond:
         pass
 
 
-def _fish(behavior: BehaviorConfig, minutes: float) -> tuple[_Pond, list[str]]:
+def _fish(
+    behavior: BehaviorConfig, minutes: float, game: GameConfig | None = None, focused: bool = True
+) -> tuple[_Pond, list[str]]:
+    """Fish for `minutes`, or until the session limit in `game` stops the engine."""
     pond = _Pond()
-    cfg = Config(game=GameConfig(), vision=VisionConfig(), audio=AudioConfig(), behavior=behavior)
+    pond.focused = focused
+    cfg = Config(game=game or GameConfig(), vision=VisionConfig(), audio=AudioConfig(),
+                 behavior=behavior)  # fmt: skip
     engine = FishingEngine(
         cfg, WindowRef("World of Warcraft", None, 0, 0, 10, 10),
         capturer=pond, input_device=pond, audio_source=pond, detector=pond, matcher=pond,
-        clock=pond.clock, sleep=pond.sleep, rng=random.Random(7), session_s=0,
+        clock=pond.clock, sleep=pond.sleep, rng=random.Random(7),
     )  # fmt: skip
-    while pond.t < minutes * 60:
+    while pond.t < minutes * 60 and engine.state is not State.STOPPED:
         engine.step()
     return pond, [describe(e) for e in engine.events.queue]
 
@@ -447,3 +454,20 @@ def test_fishing_loop_varies_its_rhythm_only_when_asked():
     for (jumped_at, before, _), (t, key, _) in zip(pond.pressed, pond.pressed[1:], strict=False):
         if key == "1":
             assert before == "space" and t - jumped_at >= 1.0
+
+
+def test_session_limit_quits_the_game_only_when_asked():
+    """When the time limit runs out with a quit key set, that key is the last press, pressed
+    once. Without a quit key, or with the game not focused, the bot only stops."""
+    game = GameConfig(session_minutes=1, quit_key="0")
+    pond, lines = _fish(BehaviorConfig(), 5, game)
+    keys = [k for _, k, _ in pond.pressed]
+    assert keys.count("0") == 1 and keys[-1] == "0" and pond.pressed[-1][0] >= 60
+    assert lines[-1] == "Stopped (session limit)"
+
+    pond, _ = _fish(BehaviorConfig(), 5, GameConfig(session_minutes=1))
+    assert "0" not in {k for _, k, _ in pond.pressed}
+
+    pond, lines = _fish(BehaviorConfig(), 5, game, focused=False)
+    assert pond.pressed == []
+    assert any("left it running" in line for line in lines)

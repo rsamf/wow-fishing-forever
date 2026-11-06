@@ -34,6 +34,7 @@ class GameConfig:
     cast_key: str = "1"
     interact_key: str = "f"
     session_minutes: int = 0
+    quit_key: str = ""  # an action bar /quit macro, pressed when session_minutes runs out
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,8 @@ def _validate(path: Path, cfg: Config) -> None:
             raise ConfigError(path, f"{key} {rule}")
 
     check(cfg.game.session_minutes >= 0, "game.session_minutes", "must be 0 (forever) or positive")
+    q = cfg.game.quit_key
+    check(not q or is_supported_key(q), "game.quit_key", "must be empty or a supported key name")
     v, a = cfg.vision, cfg.audio
     check(0.0 < v.icon_threshold <= 1.0, "vision.icon_threshold", "must be in (0, 1]")
     check(v.match_width >= 320, "vision.match_width", "must be at least 320")

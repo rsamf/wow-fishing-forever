@@ -33,7 +33,8 @@ class FishPage:
         self.minutes = tb.Spinbox(top, from_=0, to=1440, increment=15, width=5)
         self.minutes.set(presenter.cfg.game.session_minutes)
         self.minutes.pack(side="left")
-        tb.Label(top, text="min (0 = never)").pack(side="left", padx=(4, 0))
+        self.limit_note = tb.Label(top, text="min (0 = never)")
+        self.limit_note.pack(side="left", padx=(4, 0))
         self.state = tb.Label(top, text="IDLE", bootstyle="@secondary", padding=(8, 2))
         self.state.pack(side="left", padx=12)
         self.blockers = tb.Label(top, text="", bootstyle="warning")
@@ -84,6 +85,9 @@ class FishPage:
         self.start.configure(state="disabled" if view.running else "normal")
         self.stop.configure(state="normal" if view.running else "disabled")
         self.minutes.configure(state="disabled" if view.running else "normal")
+        quit_key = self.p.cfg.game.quit_key
+        then = f", then press {quit_key} to quit the game" if quit_key else ""
+        self.limit_note.configure(text=f"min (0 = never){then}")
         if view.thumbnail_png is not None and view.thumbnail_png is not getattr(
             self, "_last_png", None
         ):

@@ -142,6 +142,7 @@ class FishingEngine:
             self._finish("user")
             return
         if self.session_s != 0 and now - self.started >= self.session_s:
+            self._quit_game()
             self._finish("session limit")
             return
         try:
@@ -339,6 +340,22 @@ class FishingEngine:
             return True
         self._misses += 1
         return False
+
+    def _quit_game(self) -> None:
+        """Press the key of the player's /quit macro, if one is set, so the game logs out and
+        closes when the session runs out."""
+        key = self.cfg.game.quit_key
+        if not key:
+            return
+        try:
+            if self.input.is_game_focused(self.window) is False:
+                self._emit(
+                    ev.Error(self._t(), "time is up, but the game is not focused; left it running")
+                )
+                return
+            self._press(key, "quit")
+        except Exception as e:
+            self._emit(ev.Error(self._t(), f"could not quit the game: {type(e).__name__}: {e}"))
 
     def _press(self, key: str, why: str) -> None:
         self.input.press_key(key, self.behavior.hold_s())
