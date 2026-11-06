@@ -40,11 +40,9 @@ def listen(
     ),
 ) -> None:
     """Show the audio level and the four clip scores; print BITE lines when the detector fires."""
-    from wowfish.assets import CLIP_FAMILIES
     from wowfish.audio import AudioChunk, AudioUnavailable, devices
     from wowfish.audio._file import WavFileSource
-    from wowfish.audio.clips import build_fingerprints
-    from wowfish.audio.detector import BiteDetector
+    from wowfish.audio.detector import detector_for
     from wowfish.audio.wav import write_wav
 
     if list_devices:
@@ -62,12 +60,7 @@ def listen(
         return
 
     cfg = load_config_or_fail()
-    detector = BiteDetector(
-        build_fingerprints(),
-        trigger_clips=CLIP_FAMILIES[cfg.audio.bite_clip],
-        threshold=threshold if threshold is not None else cfg.audio.bite_threshold,
-        refractory_s=cfg.audio.refractory_s,
-    )
+    detector = detector_for(cfg.audio, threshold=threshold)
     if source_file is not None:
         source = WavFileSource(source_file)
     else:

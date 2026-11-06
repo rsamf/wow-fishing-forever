@@ -72,14 +72,18 @@ class SetupPage:
             audio, text="Fish by hand while it records; it needs at least one bite."
         )
         self.verify_note.grid(row=2, column=1, columnspan=3, sticky="w", padx=6, pady=(8, 0))
-        self.save_bite = tb.Button(
-            audio,
-            text="Save threshold",
-            command=self._save_bite,
-            bootstyle="success",
-            state="disabled",
+        bite_row = tb.Frame(audio)
+        bite_row.grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        tb.Label(bite_row, text="Bite threshold").pack(side="left")
+        self.bite = tb.Entry(bite_row, width=6)
+        self.bite.insert(0, f"{presenter.cfg.audio.bite_threshold:.2f}")
+        self.bite.pack(side="left", padx=6)
+        self.bite.bind("<Return>", lambda _e: self._save_bite())
+        tb.Button(bite_row, text="Save", command=self._save_bite, bootstyle="success").pack(
+            side="left"
         )
-        self.save_bite.grid(row=3, column=0, sticky="w", pady=(6, 0))
+        self.bite_note = tb.Label(bite_row, text="A splash must score at least this to count.")
+        self.bite_note.pack(side="left", padx=6)
 
         cal = tb.Labelframe(f, text="Icon calibration (what the bot looks for)", padding=8)
         cal.pack(fill="both", expand=True, pady=4)
@@ -128,8 +132,12 @@ class SetupPage:
         self.p.record_and_verify(60.0, self._selected_device())
 
     def _save_bite(self) -> None:
-        self.p.save_bite_threshold()
-        self.verify_note.configure(text=self.verify_note.cget("text") + "  (saved)")
+        try:
+            saved = self.p.save_bite_threshold(self.bite.get())
+        except ValueError as e:
+            self.bite_note.configure(text=str(e))
+            return
+        self.bite_note.configure(text=f"saved {saved:.2f}; used from the next Start")
 
     def _save_cal(self) -> None:
         self.p.save_calibration()
@@ -158,4 +166,7 @@ class SetupPage:
                     self.save_cal.configure(state="disabled")
             elif isinstance(item, VerifyDone):
                 self.verify_note.configure(text=view.new_lines[view.log_events.index(item)])
-                self.save_bite.configure(state="normal" if item.report.stands_out else "disabled")
+                if item.report.stands_out:  # suggest, but only Save changes the config
+                    self.bite.delete(0, "end")
+                    self.bite.insert(0, f"{item.report.threshold:.2f}")
+                    self.bite_note.configure(text="suggested by the bite check; Save to use it")

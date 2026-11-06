@@ -52,10 +52,9 @@ def describe(event: ev.Event) -> str:
             return f"No splash within {s:g} s; {detail}; recasting"
         case ev.Timeout(what="bite", after_s=s):
             return f"No splash within {s:g} s; recasting"
-        case ev.Listening(level_dbfs=level, best_clip=clip, best_score=score) if clip:
-            return f"Listening at {level:.0f} dBFS; best match so far {score:.2f} ({clip})"
-        case ev.Listening(level_dbfs=level):
-            return f"Listening at {level:.0f} dBFS; nothing has matched yet"
+        case ev.Listening(best_clip=clip, best_score=score, threshold=threshold):
+            which = f" ({clip})" if clip else ""  # no clip: everything so far was silence
+            return f"Best match so far {max(score, 0.0):.2f}{which}; threshold {threshold:.2f}"
         case ev.Timeout(after_s=s):
             return f"Bobber still there {s:g} s after Interact; recasting"
         case ev.Paused(reason=reason):
@@ -82,7 +81,7 @@ class CalibrateDone:
 
 @dataclass(frozen=True)
 class VerifyDone:
-    report: Any  # audio.verify.FamilyReport
+    report: Any  # audio.verify.BiteReport
     recording: Path
 
 
@@ -90,6 +89,18 @@ class VerifyDone:
 class WorkerFailed:
     what: str
     message: str
+
+
+@dataclass
+class ScoreTrace:
+    """One cast's per-clip scores for the Scores graph, from the bobber found to bite/timeout."""
+
+    t0: float = 0.0  # engine time the bobber was found; the graph's x is t - t0
+    points: list[tuple[float, dict[str, float]]] = field(default_factory=list)  # (t, peaks)
+    threshold: float | None = None  # what the running detector compares against
+    bite: tuple[float, str, float] | None = None  # (t, clip, score) when the bot heard it
+    timed_out: bool = False
+    version: int = 0  # bumped on every change, so the graph redraws only when needed
 
 
 @dataclass
@@ -104,6 +115,7 @@ class View:
     last_scores: dict[str, float]
     new_lines: list[str] = field(default_factory=list)
     log_events: list[object] = field(default_factory=list)
+    trace: ScoreTrace = field(default_factory=ScoreTrace)
 
 
 class _Meter:
@@ -171,7 +183,7 @@ class Presenter:
         self.thumbnail_png: bytes | None = None
         self._before_pause: tuple[str, str, str] | None = None
         self.last_calibration: CalibrateDone | None = None
-        self.last_report: VerifyDone | None = None
+        self.trace = ScoreTrace()
 
     # -- config -----------------------------------------------------------------------------
 
@@ -226,13 +238,19 @@ class Presenter:
         save_config(replace(self.cfg, vision=vision))
         self.reload()
 
-    def save_bite_threshold(self) -> None:
-        if self.last_report is None:
-            raise ValueError("record and verify first")
-        report = self.last_report.report
-        audio = replace(self.cfg.audio, bite_clip=report.family, bite_threshold=report.threshold)
-        save_config(replace(self.cfg, audio=audio))
+    def save_bite_threshold(self, value: str) -> float:
+        """Check and save the bite threshold typed on the Setup tab; the bot uses it from the
+        next Start. Raises ValueError with a plain message when it is not a number in (0, 1]."""
+        try:
+            threshold = float(value)
+        except ValueError:
+            raise ValueError(f"{value.strip() or 'empty'} is not a number") from None
+        if not 0.0 < threshold <= 1.0:
+            raise ValueError("must be more than 0 and at most 1")
+        self.reload()  # a running bot may have saved a calibration since this was loaded
+        save_config(replace(self.cfg, audio=replace(self.cfg.audio, bite_threshold=threshold)))
         self.reload()
+        return threshold
 
     def prerequisites(self) -> list[str]:
         """What blocks Start, in plain words; empty when the bot can run."""
@@ -297,6 +315,9 @@ class Presenter:
                     event = q.get_nowait()
                 except queue.Empty:
                     break
+                if isinstance(event, ev.Scores):  # the graph's feed: not a log line
+                    self._add_scores(event)
+                    continue
                 items.append(event)
                 lines.append(describe(event))
                 logger.debug(lines[-1])
@@ -312,8 +333,13 @@ class Presenter:
             lines.append(self._describe_result(item))
         return View(
             self.state, self.did, self.next, self.stats, self.thumbnail_png, self.running,
-            self.level_dbfs, self.last_scores, lines, items,
+            self.level_dbfs, self.last_scores, lines, items, self.trace,
         )  # fmt: skip
+
+    def _add_scores(self, event: ev.Scores) -> None:
+        self.trace.points.append((event.t, event.peaks))
+        self.trace.threshold = event.threshold
+        self.trace.version += 1
 
     def _apply(self, event: ev.Event) -> None:
         match event:
@@ -321,6 +347,15 @@ class Presenter:
                 self.state, self.did, self.next = state.name, did, nxt
             case ev.IconFound(thumbnail=thumb, box=box):
                 self.thumbnail_png = image.bgr_to_png_bytes(image.with_box(thumb, box))
+                self.trace = ScoreTrace(
+                    t0=event.t, threshold=self.trace.threshold, version=self.trace.version + 1
+                )
+            case ev.BiteHeard(clip=clip, score=score):
+                self.trace.bite = (event.t, clip, score)
+                self.trace.version += 1
+            case ev.Timeout(what="bite"):
+                self.trace.timed_out = True
+                self.trace.version += 1
             case ev.Stats():
                 self.stats = event.as_line()
             case ev.Paused(reason=reason):
@@ -344,7 +379,6 @@ class Presenter:
                 ok = "ok" if cal.valid else "no gold icon found; cast first and try again"
                 return f"Calibration: {cal.icon_size_px} px, score {cal.score:.2f} ({ok})"
             case VerifyDone(report=r, recording=path):
-                self.last_report = item
                 if r.stands_out:
                     lo = min(b.score for b in r.bites)
                     hi = max(b.score for b in r.bites)
@@ -400,7 +434,7 @@ class Presenter:
     def _verify_worker(self, seconds: float, selector: str | None) -> None:
         from wowfish.audio.clips import build_fingerprints
         from wowfish.audio.features import DEFAULT_MEL
-        from wowfish.audio.verify import family_report, score_recording
+        from wowfish.audio.verify import bite_report, score_recording
         from wowfish.audio.wav import write_wav
 
         try:
@@ -421,7 +455,7 @@ class Presenter:
             write_wav(path, y, source.sample_rate)
             fps = build_fingerprints()
             scores = score_recording(y, source.sample_rate, fps, DEFAULT_MEL)
-            report = family_report(scores, fps, DEFAULT_MEL, self.cfg.audio.bite_clip)
+            report = bite_report(scores, fps, DEFAULT_MEL)
             self._results.put(VerifyDone(report, path))
         except Exception as e:
             self._results.put(WorkerFailed("verify the bite", str(e)))
@@ -439,9 +473,7 @@ class Presenter:
         return self._meter is not None and self._meter.thread.is_alive()
 
     def start_meter(self, selector: str | None = None) -> None:
-        from wowfish.assets import CLIP_FAMILIES
-        from wowfish.audio.clips import build_fingerprints
-        from wowfish.audio.detector import BiteDetector
+        from wowfish.audio.detector import detector_for
 
         self.stop_meter()
         try:
@@ -449,11 +481,7 @@ class Presenter:
         except Exception as e:
             self._results.put(WorkerFailed("open the audio device", str(e)))
             return
-        detector = BiteDetector(
-            build_fingerprints(),
-            trigger_clips=CLIP_FAMILIES[self.cfg.audio.bite_clip],
-            threshold=self.cfg.audio.bite_threshold,
-        )
+        detector = detector_for(self.cfg.audio)
         self._meter = _Meter(source, detector)
         self._meter.start()
 

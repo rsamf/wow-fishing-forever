@@ -6,11 +6,8 @@ import sys
 from pathlib import Path
 
 ICON_SIZES: tuple[int, ...] = (29, 42, 53, 79, 103)
-CLIP_FAMILIES: dict[str, tuple[str, ...]] = {
-    "fishingbobber": ("fishingbobber_1", "fishingbobber_2", "fishingbobber_3"),
-    "fishbite": ("fishbite",),
-}
-CLIP_NAMES: tuple[str, ...] = tuple(n for names in CLIP_FAMILIES.values() for n in names)
+# The splash sounds the game plays when a fish bites; any of them counts as the bite.
+CLIP_NAMES: tuple[str, ...] = ("fishingbobber_1", "fishingbobber_2", "fishingbobber_3", "fishbite")
 
 
 def asset_dir() -> Path:

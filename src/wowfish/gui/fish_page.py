@@ -1,4 +1,5 @@
-"""Fish tab: Start/Stop, what the bot did and will do next, the frame it matched, stats, log."""
+"""Fish tab: Start/Stop, what the bot did and will do next, the frame it matched, stats, and
+Scores | Logs sub-tabs (the clip scores of the current cast, or the event log)."""
 
 from __future__ import annotations
 
@@ -6,6 +7,7 @@ from typing import Any
 
 from wowfish.gui import image
 from wowfish.gui.presenter import Presenter, View
+from wowfish.gui.score_graph import ScoreGraph
 
 
 class FishPage:
@@ -37,7 +39,9 @@ class FishPage:
         )
         self.did.pack(anchor="w", pady=(10, 0))
         self.next = tb.Label(f, text="", font=("TkDefaultFont", 11), wraplength=860, justify="left")
-        self.next.pack(anchor="w", pady=(2, 8))
+        self.next.pack(anchor="w", pady=(2, 0))
+        self.stats = tb.Label(f, text=presenter.stats)
+        self.stats.pack(anchor="w", pady=(2, 8))
 
         mid = tb.Frame(f)
         mid.pack(fill="both", expand=True)
@@ -46,11 +50,13 @@ class FishPage:
         self._photo = None
         right = tb.Frame(mid)
         right.pack(side="left", fill="both", expand=True, padx=(10, 0))
-        self.stats = tb.Label(right, text=presenter.stats)
-        self.stats.pack(anchor="w")
-        self.log = ScrolledText(right, height=18, wrap="word")
-        self.log.pack(fill="both", expand=True, pady=(6, 0))
+        tabs = tb.Notebook(right)
+        tabs.pack(fill="both", expand=True)
+        self.graph = ScoreGraph(tabs)
+        self.log = ScrolledText(tabs, height=18, wrap="word")
         self.log.configure(state="disabled")
+        tabs.add(self.graph.canvas, text="Scores")  # first, so it is the tab shown at start
+        tabs.add(self.log, text="Logs")
 
     def _start(self) -> None:
         reasons = self.p.prerequisites()
@@ -73,6 +79,7 @@ class FishPage:
             self._last_png = view.thumbnail_png
             self._photo = image.photo_from_png(view.thumbnail_png)
             self.image.configure(image=self._photo, text="")
+        self.graph.show(view.trace, self.p.cfg.run.cast_timeout_s)
         if view.new_lines:
             self.log.configure(state="normal")
             for line in view.new_lines:

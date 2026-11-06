@@ -1,16 +1,20 @@
-"""Streaming bite detector: feed audio chunks, get a BiteEvent when a trigger onset is heard."""
+"""Streaming bite detector: feed audio chunks, get a BiteEvent when a clip's onset is heard."""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from wowfish.audio import AudioChunk
 from wowfish.audio.features import DEFAULT_MEL, MelParams, log_mel
 from wowfish.audio.fingerprint import Fingerprint, score_sequence
+
+if TYPE_CHECKING:
+    from wowfish.config import AudioConfig
 
 
 @dataclass(frozen=True)
@@ -36,14 +40,12 @@ class BiteDetector:
         fingerprints: Sequence[Fingerprint],
         p: MelParams = DEFAULT_MEL,
         *,
-        trigger_clips: Sequence[str],
         threshold: float = 0.66,
         refractory_s: float = 3.0,
         min_consecutive: int = 1,
     ) -> None:
         self.fingerprints = tuple(fingerprints)
         self.p = p
-        self.trigger = frozenset(trigger_clips)
         self.threshold = threshold
         self.refractory_s = refractory_s
         self.min_consecutive = min_consecutive
@@ -53,11 +55,11 @@ class BiteDetector:
         self._feats = np.zeros((0, p.n_mels), dtype=np.float32)
         self._frames_total = 0
         self._run = dict.fromkeys(names, 0)
-        # armed[name] = (peak score, onset time of the peak, frames since the peak) while a
-        # trigger clip is over the threshold and the event has not been emitted yet
         self._armed: dict[str, tuple[float, float, int]] = {}
         self._hold_frames = max(1, round(PEAK_HOLD_S / p.frame_s))
         self._scores = {name: ClipScore(name, -1.0, 0.0) for name in names}
+        self._best = ClipScore("", -1.0, 0.0)
+        self._peaks = dict.fromkeys(names, -1.0)  # per-clip max since the last take_peaks()
         self._level_dbfs = -120.0
         self._quiet_until = -math.inf
 
@@ -69,10 +71,28 @@ class BiteDetector:
             self._run[name] = 0
         self._armed.clear()
         self._quiet_until = -math.inf
+        self._best = ClipScore("", -1.0, 0.0)
+        self._peaks = dict.fromkeys(self._peaks, -1.0)
 
     @property
     def last_scores(self) -> tuple[ClipScore, ...]:
         return tuple(self._scores[fp.name] for fp in self.fingerprints)
+
+    @property
+    def best_heard(self) -> ClipScore:
+        """The highest score any clip reached since the last reset ("" before anything scores).
+
+        `last_scores` holds only the newest frame of each feed, and a bite's peak is one hop
+        wide, so it would almost never show the peak the threshold was compared against.
+        """
+        return self._best
+
+    def take_peaks(self) -> dict[str, float]:
+        """Each clip's highest score since the previous call (-1.0: nothing scored, i.e. silence),
+        then start over. A bucket's max keeps the one-hop-wide bite peak a sample would miss."""
+        peaks = self._peaks
+        self._peaks = dict.fromkeys(peaks, -1.0)
+        return peaks
 
     @property
     def level_dbfs(self) -> float:
@@ -122,6 +142,10 @@ class BiteDetector:
                     continue
                 t_onset = t_end - fp.length * p.hop / p.sample_rate
                 self._scores[name] = ClipScore(name, score, t_onset)
+                if score > self._best.score:
+                    self._best = self._scores[name]
+                if score > self._peaks[name]:
+                    self._peaks[name] = score
                 armed = self._armed.get(name)
                 if score < self.threshold:
                     self._run[name] = 0
@@ -135,11 +159,7 @@ class BiteDetector:
                     self._armed[name] = armed
                     if armed[2] >= self._hold_frames:
                         self._emit(events, name, armed, t_end)
-                elif (
-                    name in self.trigger
-                    and self._run[name] == self.min_consecutive
-                    and t_end >= self._quiet_until
-                ):
+                elif self._run[name] == self.min_consecutive and t_end >= self._quiet_until:
                     self._armed[name] = (score, t_onset, 0)
         self._feats = feats[-(2 * self._max_len) :]
         return events
@@ -151,3 +171,14 @@ class BiteDetector:
         events.append(BiteEvent(name, peak, peak_onset))
         self._quiet_until = t_end + self.refractory_s
         del self._armed[name]
+
+
+def detector_for(audio: AudioConfig, *, threshold: float | None = None) -> BiteDetector:
+    """The detector the bot runs: every bundled clip can fire, at the configured threshold."""
+    from wowfish.audio.clips import build_fingerprints
+
+    return BiteDetector(
+        build_fingerprints(),
+        threshold=audio.bite_threshold if threshold is None else threshold,
+        refractory_s=audio.refractory_s,
+    )

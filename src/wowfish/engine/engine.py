@@ -30,6 +30,7 @@ AUDIO_BLOCK = 1024
 AUDIO_MAX_S = 2.0  # never read more than this at once; the device buffer may drop older audio
 STATS_EVERY_S = 10.0
 LISTEN_EVERY_S = 2.0  # while waiting for the splash, say what is heard this often
+SCORES_EVERY_S = 0.1  # ...and send each clip's peak score this often, for the GUI's graph
 SLEEP_SLICE_S = 0.1
 RESWEEP_AFTER_TIMEOUTS = 2  # icon timeouts in a row before the next cast measures the icon again
 
@@ -98,6 +99,7 @@ class FishingEngine:
         self._audio_frames = 0
         self._last_stats = 0.0
         self._last_listen = 0.0
+        self._last_scores_sent = 0.0
         self._best_heard: tuple[str, float] = ("", -1.0)  # best clip score since the icon was found
 
     # -- public ------------------------------------------------------------------------------
@@ -155,6 +157,7 @@ class FishingEngine:
             for chunk in chunks:
                 bites.extend(self.detector.feed(chunk))
             self._note_scores()
+            self._send_scores(now, flush=bool(bites))  # flush so the graph gets the bite's peak
 
         if self.state is State.IDLE:
             self._cast(now)
@@ -232,7 +235,7 @@ class FishingEngine:
         self._emit(ev.IconFound(self._t(), thumb, box, float(m.score), int(m.size), (m.x, m.y)))
         self.detector.reset()
         self._best_heard = ("", -1.0)
-        self._last_listen = self._clock()
+        self._last_listen = self._last_scores_sent = self._clock()
         self._change(
             State.WAIT_BITE,
             f"Found the bobber at ({m.x}, {m.y})",
@@ -347,9 +350,19 @@ class FishingEngine:
         self._emit_stats()
 
     def _note_scores(self) -> None:
-        for sc in getattr(self.detector, "last_scores", ()):
-            if sc.score > self._best_heard[1]:
-                self._best_heard = (sc.name, float(sc.score))
+        best = getattr(self.detector, "best_heard", None)
+        if best is not None and best.score > self._best_heard[1]:
+            self._best_heard = (best.name, float(best.score))
+
+    def _bite_threshold(self) -> float:
+        return float(getattr(self.detector, "threshold", self.cfg.audio.bite_threshold))
+
+    def _send_scores(self, now: float, *, flush: bool) -> None:
+        take = getattr(self.detector, "take_peaks", None)
+        if take is None or not (flush or now - self._last_scores_sent >= SCORES_EVERY_S):
+            return
+        self._last_scores_sent = now
+        self._emit(ev.Scores(self._t(), take(), self._bite_threshold()))
 
     def _maybe_stats(self, now: float) -> None:
         if self.state is not State.WAIT_BITE:
@@ -357,8 +370,7 @@ class FishingEngine:
         if now - self._last_listen >= LISTEN_EVERY_S:
             self._last_listen = now
             clip, score = self._best_heard
-            level = float(getattr(self.detector, "level_dbfs", -120.0))
-            self._emit(ev.Listening(self._t(), level, clip, score))
+            self._emit(ev.Listening(self._t(), clip, score, self._bite_threshold()))
         if now - self._last_stats >= STATS_EVERY_S:
             self._emit_stats()
 
@@ -427,10 +439,8 @@ def build_engine(
     missed splashes offline). Raises RuntimeError with a one-line hint when a prerequisite is
     missing.
     """
-    from wowfish.assets import CLIP_FAMILIES
     from wowfish.audio._recording import RecordingSource
-    from wowfish.audio.clips import build_fingerprints
-    from wowfish.audio.detector import BiteDetector
+    from wowfish.audio.detector import detector_for
     from wowfish.audio.devices import open_capture
     from wowfish.input import get_input_device
     from wowfish.vision.matcher import MIN_TEMPLATE_PX, IconMatcher
@@ -464,12 +474,7 @@ def build_engine(
         )
         save_config(replace(current, vision=vision))
 
-    detector = BiteDetector(
-        build_fingerprints(),
-        trigger_clips=CLIP_FAMILIES[cfg.audio.bite_clip],
-        threshold=cfg.audio.bite_threshold,
-        refractory_s=cfg.audio.refractory_s,
-    )
+    detector = detector_for(cfg.audio)
     audio: Any = ThreadedSource(open_capture(cfg.audio.selector, pid=window.pid, title=title))
     if record_audio is not None:
         audio = RecordingSource(audio, record_audio)

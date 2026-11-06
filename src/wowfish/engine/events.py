@@ -67,11 +67,19 @@ class Timeout(Event):
 
 @dataclass(frozen=True)
 class Listening(Event):
-    """Periodic while waiting for the splash: what the detector hears and its best match so far."""
+    """Periodic while waiting for the splash: the best match so far and the bar it must clear."""
 
-    level_dbfs: float
     best_clip: str  # "" when nothing has scored yet
     best_score: float  # -1.0 when nothing has scored yet
+    threshold: float  # the bite_threshold the detector is comparing against
+
+
+@dataclass(frozen=True)
+class Scores(Event):
+    """Every SCORES_EVERY_S while waiting for the splash, for the GUI's score graph (not logged)."""
+
+    peaks: dict[str, float]  # each clip's highest score in this slice; -1.0 = silent
+    threshold: float  # the bite_threshold the detector is comparing against
 
 
 @dataclass(frozen=True)

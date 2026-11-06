@@ -11,7 +11,7 @@ from typing import Any
 import tomli_w
 
 from wowfish import paths
-from wowfish.assets import CLIP_FAMILIES, default_config_path
+from wowfish.assets import default_config_path
 
 _LINE_RE = re.compile(r"\(at line (\d+), column \d+\)")
 
@@ -47,7 +47,6 @@ class VisionConfig:
 class AudioConfig:
     capture: str = "game"  # "game": the game's own audio stream; "device": the loopback `device`
     device: str = ""
-    bite_clip: str = "fishingbobber"
     bite_threshold: float = 0.66
     refractory_s: float = 3.0
 
@@ -161,8 +160,6 @@ def _validate(path: Path, cfg: Config) -> None:
     check(a.capture in ("game", "device"), "audio.capture", 'must be "game" or "device"')
     check(0.0 < a.bite_threshold <= 1.0, "audio.bite_threshold", "must be in (0, 1]")
     check(a.refractory_s >= 0.0, "audio.refractory_s", "must be 0 or positive")
-    families = ", ".join(CLIP_FAMILIES)
-    check(a.bite_clip in CLIP_FAMILIES, "audio.bite_clip", f"must be one of: {families}")
     r = cfg.run
     check(r.icon_timeout_s > 0, "run.icon_timeout_s", "must be positive")
     check(r.cast_timeout_s > 0, "run.cast_timeout_s", "must be positive")

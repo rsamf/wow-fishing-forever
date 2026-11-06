@@ -63,14 +63,17 @@ def run(
                 if not thread.is_alive():
                     break
                 continue
-            typer.echo(_line(event))
+            if not isinstance(event, ev.Scores):  # the GUI's graph feed, 10 a second
+                typer.echo(_line(event))
             if isinstance(event, ev.Stopped):
                 break
     except KeyboardInterrupt:
         typer.echo("stopping", err=True)
         thread.stop()
         while not engine.events.empty():
-            typer.echo(_line(engine.events.get_nowait()))
+            event = engine.events.get_nowait()
+            if not isinstance(event, ev.Scores):
+                typer.echo(_line(event))
     if record_audio is not None:
         typer.echo(f"wrote {record_audio}", err=True)
     typer.echo(engine.stats.as_line())

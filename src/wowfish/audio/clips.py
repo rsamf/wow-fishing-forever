@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wowfish.assets import CLIP_FAMILIES, CLIP_NAMES, clip_path
+from wowfish.assets import CLIP_NAMES, clip_path
 from wowfish.audio.features import DEFAULT_MEL, MelParams
 from wowfish.audio.fingerprint import Fingerprint, build_fingerprint
 from wowfish.audio.wav import read_wav, resample
@@ -25,10 +25,3 @@ def build_fingerprints(
 ) -> tuple[Fingerprint, ...]:
     clips = load_reference_clips(p.sample_rate)
     return tuple(build_fingerprint(name, clips[name], p, onset_s) for name in CLIP_NAMES)
-
-
-def family_of(name: str) -> str:
-    for family, names in CLIP_FAMILIES.items():
-        if name in names:
-            return family
-    raise KeyError(name)

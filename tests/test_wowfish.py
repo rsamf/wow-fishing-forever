@@ -18,7 +18,7 @@ from loguru import logger
 from wowfish.assets import CLIP_NAMES, ICON_SIZES
 from wowfish.audio import AudioChunk
 from wowfish.audio.clips import build_fingerprints, load_reference_clips
-from wowfish.audio.detector import BiteDetector, BiteEvent
+from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
 from wowfish.cli import _setup_logging
 from wowfish.config import (
@@ -77,31 +77,38 @@ def test_logging_works_without_stderr(tmp_path, monkeypatch):
     assert "started without a console" in log_path.read_text()
 
 
-def _hear(stream: np.ndarray, **kwargs) -> list[BiteEvent]:
-    """Run a stream through a fresh detector in modest chunks, like the live loop does."""
-    det = BiteDetector(build_fingerprints(), trigger_clips=CLIP_NAMES, **kwargs)
+def _hear(stream: np.ndarray) -> tuple[list[BiteEvent], BiteDetector]:
+    """Run a stream through the detector the bot builds from the default config, in modest
+    chunks like the live loop does."""
+    det = detector_for(AudioConfig())
     events: list[BiteEvent] = []
     chunk = 2048
     for i in range(0, len(stream), chunk):
         part = stream[i : i + chunk]
         events += det.feed(AudioChunk(part, RATE, (i + len(part)) / RATE))
-    return events
+    return events, det
 
 
 def test_bite_detector_hears_each_clip_once():
-    """Each bundled splash, padded with silence, yields exactly one bite naming that clip,
-    above the shipped threshold, timed inside the clip. Two splashes well apart yield two."""
+    """Each of the four bundled splashes, padded with silence, yields exactly one bite naming
+    that clip, above the shipped threshold, timed inside the clip, and the "best match" the
+    status line reports and the peak the Scores graph plots are that same peak. Two splashes
+    well apart yield two."""
     threshold = AudioConfig().bite_threshold
     gap = np.zeros(RATE, dtype=np.float32)  # 1 s
     for name, clip in load_reference_clips(RATE).items():
-        events = _hear(np.concatenate([gap, clip, gap]))
+        events, det = _hear(np.concatenate([gap, clip, gap]))
         assert [e.clip for e in events] == [name], name
         assert events[0].score >= threshold, (name, events[0].score)
         assert 1.0 - 0.1 <= events[0].t <= 1.0 + len(clip) / RATE, (name, events[0].t)
+        best = det.best_heard
+        assert (best.name, best.score) == (name, events[0].score), (name, best)
+        assert det.take_peaks()[name] == events[0].score, name  # what the Scores graph plots
+        assert det.take_peaks()[name] == -1.0, name  # taking the peaks clears them
 
     clip = load_reference_clips(RATE)[CLIP_NAMES[0]]
     apart = np.zeros(4 * RATE, dtype=np.float32)  # longer than the default refractory period
-    assert len(_hear(np.concatenate([gap, clip, apart, clip, gap]))) == 2
+    assert len(_hear(np.concatenate([gap, clip, apart, clip, gap]))[0]) == 2
 
 
 def test_bite_detector_stays_quiet_on_silence_and_noise():
@@ -111,7 +118,7 @@ def test_bite_detector_stays_quiet_on_silence_and_noise():
     silence = np.zeros(3 * RATE, dtype=np.float32)
     noise = (rng.standard_normal(3 * RATE) * 0.1).astype(np.float32)
     for stream in (silence, noise):
-        det = BiteDetector(build_fingerprints(), trigger_clips=CLIP_NAMES)
+        det = detector_for(AudioConfig())
         events: list[BiteEvent] = []
         for i in range(0, len(stream), 2048):
             part = stream[i : i + 2048]

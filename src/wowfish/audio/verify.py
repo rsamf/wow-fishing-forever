@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from wowfish.audio.clips import family_of
 from wowfish.audio.detector import ClipScore
 from wowfish.audio.features import DEFAULT_MEL, MelParams, log_mel
 from wowfish.audio.fingerprint import Fingerprint, score_sequence
@@ -58,8 +57,7 @@ MAX_PEAKS = 64
 
 
 @dataclass(frozen=True)
-class FamilyReport:
-    family: str
+class BiteReport:
     bites: tuple[ClipScore, ...]  # peaks counted as bites, strongest first
     floor: float  # highest score outside the bites: what everything else scores
     threshold: float  # suggested bite_threshold
@@ -69,22 +67,24 @@ class FamilyReport:
         return bool(self.bites)
 
 
-def family_report(
+def bite_report(
     scores: dict[str, np.ndarray],
     fingerprints: Sequence[Fingerprint],
     p: MelParams,
-    family: str,
     *,
     separation_s: float = 2.0,
-) -> FamilyReport:
-    """Peel peaks off the family's best-of-clips score and split them into bites and the rest.
+) -> BiteReport:
+    """Peel peaks off the best-of-all-clips score and split them into bites and the rest.
+
+    Any clip can be the bite (the game plays one of several splash sounds), so this works on
+    the same best-of-clips score the detector compares with the threshold.
 
     A recording of a real session holds several bites of different strengths (0.72-0.94 seen)
     above a dense continuum of other game sounds (<= 0.63), so one bite must not count as another
     bite's noise. Candidates are the peaks >= MIN_BITE; the group shrinks from the bottom until
     its weakest member clears the next peak by MIN_GAP. The threshold is the floor + FLOOR_MARGIN.
     """
-    members = [fp for fp in fingerprints if family_of(fp.name) == family]
+    members = list(fingerprints)
     stack = np.stack([scores[fp.name] for fp in members])  # (clips, t)
     best = stack.max(axis=0)
     which = stack.argmax(axis=0)
@@ -111,13 +111,4 @@ def family_report(
         rest[max(0, i - half) : i + half + 1] = -1.0
     floor = float(rest.max()) if len(rest) else -1.0
     threshold = float(min(0.9, max(0.5, round(floor + FLOOR_MARGIN, 2))))
-    return FamilyReport(family, bites, floor, threshold)
-
-
-def suggest(
-    scores: dict[str, np.ndarray], fingerprints: Sequence[Fingerprint], p: MelParams
-) -> tuple[str, float]:
-    """(family of the best-scoring clip, that family's suggested threshold)."""
-    best = max(clip_peaks(scores, fingerprints, p), key=lambda c: c.score)
-    report = family_report(scores, fingerprints, p, family_of(best.name))
-    return report.family, report.threshold
+    return BiteReport(bites, floor, threshold)
