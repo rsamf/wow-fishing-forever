@@ -96,7 +96,9 @@ In the game:
 5. *Options > Sound*: set **Ambience** and **Music** to 0 and keep **Sound Effects** up.
 
 
-**Note to Linux users**: The first synthetic key press opens a "Remote Desktop" dialog. Switch on *Allow Remote Interaction* and click *Share*. Until you do, key presses are silently dropped.
+**Note to Linux users**: On GNOME, the first synthetic key press opens a "Remote Desktop" dialog. Switch on *Allow Remote Interaction* and click *Share*. Until you do, key presses are silently dropped.
+
+**Note to Wayland users**: A game running as a native Wayland client (e.g. Proton with `PROTON_ENABLE_WAYLAND=1`) is supported on Hyprland: install [`grim`](https://gitlab.freedesktop.org/emersion/grim) for screen capture; keys go through the compositor's virtual keyboard. The game must be on screen while fishing. On other compositors, run the game under Xwayland (`PROTON_ENABLE_WAYLAND=0`).
 
 **Note to Windows users**: You may need to run the program in admin mode.
 

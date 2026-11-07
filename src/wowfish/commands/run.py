@@ -74,6 +74,8 @@ def run(
             event = engine.events.get_nowait()
             if not isinstance(event, ev.Scores):
                 typer.echo(_line(event))
+    # The engine thread is a daemon: let it close the audio (and write the WAV) before exiting.
+    thread.stop(timeout=10.0)
     if record_audio is not None:
         typer.echo(f"wrote {record_audio}", err=True)
     typer.echo(engine.stats.as_line())

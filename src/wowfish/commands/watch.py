@@ -38,8 +38,8 @@ def _live_frames(
 
     window = capture.find_window(title)
     if window is not None:
-        cap = capture.get_capturer()
-    elif capture.linux_x11():
+        cap = capture.get_capturer(window)
+    elif capture.linux_x11() or capture.linux_hyprland():
         fail(f"no window titled {title!r}; is the game running?")
     else:
         from wowfish.capture import _mss
