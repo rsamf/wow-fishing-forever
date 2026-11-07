@@ -1,7 +1,7 @@
 """Seven checks that protect what the bot actually relies on: the shipped assets, the default
 config, logging in the console-less GUI executable, that the two detectors say yes to the real
-thing and no to nothing, and that a native Wayland game window is read correctly from the
-compositor's replies.
+thing and no to nothing, and that the game window is picked correctly from the compositor's
+replies.
 
 Everything here runs on bundled files and synthetic signals. No screen, audio device, window
 system, or Tk is touched, so a failure means the code or the assets changed, not the machine.
@@ -16,11 +16,13 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
+from wowfish import capture
 from wowfish.assets import CLIP_NAMES, ICON_SIZES
 from wowfish.audio import AudioChunk
 from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
+from wowfish.capture import _wayland, _x11
 from wowfish.capture._wayland import pick_hyprland_window
 from wowfish.cli import _setup_logging
 from wowfish.config import (
@@ -186,22 +188,25 @@ HEX_SYMBOLS = """\tkey <AE01> {\t[ 0x26, 0x31 ] };
 """
 
 
-def test_wayland_window_and_keys_from_compositor_replies():
-    """Hyprland reports logical geometry; the window comes back sized in its output's pixels,
-    and the largest title match wins. Each key resolves to its evdev keycode (xkb code - 8)
-    whether the keymap names keysyms (xkbcommon) or writes them in hex (Hyprland), through
-    aliases and from a shifted level (the digits on AZERTY)."""
+def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
+    """Hyprland reports logical geometry for native and Xwayland windows alike; the window comes
+    back sized in its output's pixels, and the largest title match wins whichever kind it is. An
+    Xwayland winner is then looked up through X11 by its pid. Each key resolves to its evdev
+    keycode (xkb code - 8) whether the keymap names keysyms (xkbcommon) or writes them in hex
+    (Hyprland), through aliases and from a shifted level (the digits on AZERTY)."""
 
-    def client(address, title, at, size, monitor):
-        return {"address": address, "title": title, "pid": 42, "at": at, "size": size,
-                "monitor": monitor, "mapped": True, "hidden": False}  # fmt: skip
+    def client(address, title, at, size, monitor, pid=42, xwayland=False):
+        return {"address": address, "title": title, "pid": pid, "at": at, "size": size,
+                "monitor": monitor, "mapped": True, "hidden": False,
+                "xwayland": xwayland}  # fmt: skip
 
     clients = [
         client("0x1f", "World of Warcraft - Wowhead", [0, 0], [800, 600], 0),
         client("0x2a", "World of Warcraft", [2560, 0], [3200, 1800], 1),
         client("0x3b", "Discord", [0, 0], [3840, 2160], 0),
+        client("0x4c", "World of Warcraft", [0, 0], [3000, 1700], 0, 7, xwayland=True),
     ]
-    monitors = [{"id": 0, "scale": 1.0}, {"id": 1, "scale": 1.2}]
+    monitors = [{"id": 0, "scale": 1.0}, {"id": 1, "scale": 1.2}, {"id": 2, "scale": 2.0}]
     w = pick_hyprland_window(clients, monitors, "world of warcraft")
     assert w is not None
     assert (w.title, w.pid, w.left, w.top, w.width, w.height) == (
@@ -209,6 +214,20 @@ def test_wayland_window_and_keys_from_compositor_replies():
     )  # fmt: skip
     assert (w.handle, w.compositor, w.scale) == (0x2A, "hyprland", 1.2)
     assert pick_hyprland_window(clients, monitors, "Hearthstone") is None
+
+    clients.append(client("0x5d", "World of Warcraft", [0, 0], [2560, 1440], 2, 7, xwayland=True))
+    x = pick_hyprland_window(clients, monitors, "world of warcraft")
+    assert x is not None
+    assert (x.pid, x.width, x.height, x.handle, x.compositor) == (7, 5120, 2880, None, None)
+
+    asked: list[int | None] = []
+    monkeypatch.setattr(capture, "linux_hyprland", lambda: True)
+    monkeypatch.setattr(capture, "linux_x11", lambda: True)
+    monkeypatch.setattr(_x11, "find_window_x11", lambda _, pid: asked.append(pid))
+    for winner, x11_asked in ((w, []), (x, [7])):
+        monkeypatch.setattr(_wayland, "find_window_hyprland", lambda _, found=winner: found)
+        capture.find_window()
+        assert asked == x11_asked
 
     for symbols in (NAMED_SYMBOLS, HEX_SYMBOLS):
         codes = keycodes_from_keymap(KEYMAP % symbols)

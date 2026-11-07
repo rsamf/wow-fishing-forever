@@ -9,6 +9,8 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from wowfish.errors import NotSupported
+
 Box = tuple[int, int, int, int]  # x, y, width, height in window pixels
 
 
@@ -47,18 +49,28 @@ def linux_hyprland() -> bool:
 def find_window(title_substring: str = "World of Warcraft") -> WindowRef | None:
     """The largest viewable window whose title contains the text.
 
-    X11/Xwayland first, then native Wayland windows on Hyprland, then Windows; else None.
+    On Hyprland the compositor picks it from all its windows, native Wayland and Xwayland alike;
+    an Xwayland winner is then looked up through X11 by its pid. Elsewhere X11, then Windows;
+    else None.
     """
-    if linux_x11():
-        from wowfish.capture._x11 import find_window_x11
-
-        found = find_window_x11(title_substring)
-        if found is not None:
-            return found
+    pid: int | None = None
     if linux_hyprland():
         from wowfish.capture._wayland import find_window_hyprland
 
-        return find_window_hyprland(title_substring)
+        try:
+            found = find_window_hyprland(title_substring)
+        except (NotSupported, OSError, ValueError):
+            if not linux_x11():
+                raise
+            # Hyprland's IPC did not answer; X11 alone still finds an Xwayland game
+        else:
+            if found is None or found.compositor:
+                return found
+            pid = found.pid
+    if linux_x11():
+        from wowfish.capture._x11 import find_window_x11
+
+        return find_window_x11(title_substring, pid)
     if sys.platform == "win32":
         from wowfish.capture import _win32
 

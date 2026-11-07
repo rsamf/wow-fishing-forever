@@ -52,7 +52,12 @@ def hyprland_request(command: str) -> Any:
 def pick_hyprland_window(
     clients: Sequence[dict[str, Any]], monitors: Sequence[dict[str, Any]], title_substring: str
 ) -> WindowRef | None:
-    """The largest mapped window whose title contains the text, sized in its output's pixels."""
+    """The largest mapped window whose title contains the text, sized in its output's pixels.
+
+    Xwayland windows are candidates too. Hyprland reports them in the same logical pixels as
+    native ones, whatever xwayland:force_zero_scaling makes their X11 size, so all compare
+    alike. An Xwayland winner comes back without a handle or compositor: X11 grabs it.
+    """
     scales = {m.get("id"): float(m.get("scale") or 1.0) for m in monitors}
     wanted = title_substring.lower()
     found: list[WindowRef] = []
@@ -63,6 +68,7 @@ def pick_hyprland_window(
         (x, y), (w, h) = c["at"], c["size"]
         scale = scales.get(c.get("monitor"), 1.0)
         pid = c.get("pid")
+        native = not c.get("xwayland")
         found.append(
             WindowRef(
                 title,
@@ -71,8 +77,8 @@ def pick_hyprland_window(
                 int(y),
                 int(w * scale),  # grim sizes its image the same way (C truncation)
                 int(h * scale),
-                int(str(c["address"]), 16),
-                "hyprland",
+                int(str(c["address"]), 16) if native else None,
+                "hyprland" if native else None,
                 scale,
             )
         )
