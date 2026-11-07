@@ -5,7 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 from wowfish.gui import image
-from wowfish.gui.presenter import CalibrateDone, Presenter, VerifyDone, View
+from wowfish.gui.presenter import (
+    CALIBRATE_WATCH_S,
+    CalibrateDone,
+    Presenter,
+    VerifyDone,
+    View,
+    WorkerFailed,
+)
 
 CHECKLIST = (
     "In the game, before starting:\n"
@@ -13,7 +20,13 @@ CHECKLIST = (
     "  2. Bind Interact With Target (Options > Keybindings > Targeting) to the interact key.\n"
     "  3. Enable Auto Loot (Options > Controls).\n"
     "  4. Type /console SoftTargetIconGameObject 1 once (shows the gold gear over the bobber).\n"
-    "  5. Set Ambience and Music to 0 so the splash is easy to hear."
+    "  5. Set Ambience and Music to 0 so the splash is easy to hear.\n"
+    "Then press Start on the Fish tab. The first cast of every run measures the gear icon, so\n"
+    "the bite check and the calibration below are optional: use them when fishing misbehaves."
+)
+VERIFY_HINT = "Click, then fish by hand in the game until a fish bites (it records for 60 s)."
+CALIBRATE_HINT = (
+    f"Click, then cast in the game: it watches for the gold gear for up to {CALIBRATE_WATCH_S:g} s."
 )
 
 
@@ -42,7 +55,7 @@ class SetupPage:
         self.keys_note = tb.Label(keys_row, text="")
         self.keys_note.grid(row=0, column=5, sticky="w")
 
-        audio = tb.Labelframe(f, text="Audio (what the bot hears)", padding=8)
+        audio = tb.Labelframe(f, text="Audio (what the bot hears) and bite check", padding=8)
         audio.pack(fill="x", pady=4)
         self.devices = presenter.audio_devices()
         names = [d.name for d in self.devices]
@@ -58,19 +71,20 @@ class SetupPage:
             self.device.current(pick)
         self.device.grid(row=0, column=0, columnspan=3, sticky="w")
         tb.Button(
-            audio, text="Use this device", command=self._save_device, bootstyle="secondary"
+            audio, text="Use this and listen", command=self._save_device, bootstyle="secondary"
         ).grid(row=0, column=3, padx=6)
         tb.Label(audio, text="Level").grid(row=1, column=0, sticky="w", pady=(8, 0))
         self.meter = tb.Progressbar(audio, maximum=100, value=0, bootstyle="info", length=300)
         self.meter.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 0))
-        self.level_text = tb.Label(audio, text="silent")
+        self.level_text = tb.Label(audio, text="")
+        self._meter_error = ""
         self.level_text.grid(row=1, column=3, sticky="w", padx=6, pady=(8, 0))
-        tb.Button(
+        self.verify_button = tb.Button(
             audio, text="Record 60 s and check the bite", command=self._verify, bootstyle="info"
-        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
-        self.verify_note = tb.Label(
-            audio, text="Fish by hand while it records; it needs at least one bite."
         )
+        self.verify_button.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self._meter_was_on = False
+        self.verify_note = tb.Label(audio, text=VERIFY_HINT, wraplength=560, justify="left")
         self.verify_note.grid(row=2, column=1, columnspan=3, sticky="w", padx=6, pady=(8, 0))
         bite_row = tb.Frame(audio)
         bite_row.grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
@@ -87,13 +101,13 @@ class SetupPage:
 
         cal = tb.Labelframe(f, text="Icon calibration (what the bot looks for)", padding=8)
         cal.pack(fill="both", expand=True, pady=4)
-        tb.Button(
-            cal,
-            text="Grab the game window and calibrate",
-            command=self.p.grab_and_calibrate,
-            bootstyle="info",
-        ).grid(row=0, column=0, sticky="w")
-        self.cal_note = tb.Label(cal, text="Cast first so the gold gear icon is on screen.")
+        self.cal_button = tb.Button(
+            cal, text="Calibrate the gear icon", command=self._calibrate, bootstyle="info"
+        )
+        self.cal_button.grid(row=0, column=0, sticky="w")
+        size = presenter.cfg.vision.icon_size_px
+        current = f"Saved: {size} px. " if size > 0 else "Not calibrated yet. "
+        self.cal_note = tb.Label(cal, text=current + CALIBRATE_HINT, wraplength=560, justify="left")
         self.cal_note.grid(row=0, column=1, sticky="w", padx=6)
         self.save_cal = tb.Button(
             cal,
@@ -124,12 +138,21 @@ class SetupPage:
         sel = self._selected_device()
         if sel is not None:
             self.p.save_audio_device(sel)
+            self._meter_error = ""
             self.p.start_meter(sel)
 
     def _verify(self) -> None:
-        self.p.stop_meter()
-        self.verify_note.configure(text="Recording 60 s... fish by hand and let a fish bite.")
+        self._meter_was_on = self.p.meter_running
+        self.p.stop_meter()  # the recording shows its own level on the meter
+        self.verify_button.configure(state="disabled")
+        self.verify_note.configure(text="Starting the recording...")
         self.p.record_and_verify(60.0, self._selected_device())
+
+    def _calibrate(self) -> None:
+        self.cal_button.configure(state="disabled")
+        self.save_cal.configure(state="disabled")
+        self.cal_note.configure(text="Starting...")
+        self.p.grab_and_calibrate()
 
     def _save_bite(self) -> None:
         try:
@@ -148,25 +171,55 @@ class SetupPage:
     def render(self, view: View) -> None:
         pct = max(0.0, min(100.0, (view.level_dbfs + 60.0) / 60.0 * 100.0))
         self.meter.configure(value=pct)
-        best = max(view.last_scores.values(), default=-1.0)
-        level = "silent" if view.level_dbfs <= -60 else f"{view.level_dbfs:5.1f} dBFS"
-        self.level_text.configure(text=f"{level}   best bite score {best:.2f}")
-        for item in view.log_events:
-            if isinstance(item, CalibrateDone):
-                cal = item.calibration
-                self._photo = image.photo_from_png(item.thumbnail_png)
-                self.cal_image.configure(image=self._photo)
-                if cal.valid:
-                    self.cal_note.configure(text=f"{cal.icon_size_px} px, score {cal.score:.2f}")
-                    self.save_cal.configure(state="normal")
-                else:
-                    self.cal_note.configure(
-                        text="No gold gear icon in that frame; cast and try again."
-                    )
-                    self.save_cal.configure(state="disabled")
-            elif isinstance(item, VerifyDone):
-                self.verify_note.configure(text=view.new_lines[view.log_events.index(item)])
-                if item.report.stands_out:  # suggest, but only Save changes the config
-                    self.bite.delete(0, "end")
-                    self.bite.insert(0, f"{item.report.threshold:.2f}")
-                    self.bite_note.configure(text="suggested by the bite check; Save to use it")
+        if not view.listening:
+            self.level_text.configure(
+                text=self._meter_error or "not listening (press Use this and listen)"
+            )
+        else:
+            level = "silent" if view.level_dbfs <= -60 else f"{view.level_dbfs:5.1f} dBFS"
+            best = max(view.last_scores.values(), default=None)
+            score = f"   bite score {best:.2f}" if best is not None and best > -1.0 else ""
+            self.level_text.configure(text=level + score)
+        if view.verify_status:
+            self.verify_note.configure(text=view.verify_status)
+        if view.calibrate_status:
+            self.cal_note.configure(text=view.calibrate_status)
+        for item, line in zip(view.log_events, view.new_lines, strict=True):
+            match item:
+                case CalibrateDone(calibration=cal):
+                    self._photo = image.photo_from_png(item.thumbnail_png)
+                    self.cal_image.configure(image=self._photo)
+                    if cal.valid:
+                        self.cal_note.configure(
+                            text=f"Found it: {cal.icon_size_px} px, score {cal.score:.2f}. "
+                            "Save calibration to keep it."
+                        )
+                        self.save_cal.configure(state="normal")
+                    else:
+                        self.cal_note.configure(
+                            text=f"No gold gear icon seen in {CALIBRATE_WATCH_S:g} s. "
+                            "Is SoftTargetIconGameObject on "
+                            "and the bobber close enough to interact with? Try again."
+                        )
+                    self.cal_button.configure(state="normal")
+                case VerifyDone(report=report):
+                    self.verify_note.configure(text=line)
+                    if report.stands_out:  # suggest, but only Save changes the config
+                        self.bite.delete(0, "end")
+                        self.bite.insert(0, f"{report.threshold:.2f}")
+                        self.bite_note.configure(text="suggested by the bite check; Save to use it")
+                    self._verify_finished()
+                case WorkerFailed(what="verify the bite"):
+                    self.verify_note.configure(text=line)
+                    self._verify_finished()
+                case WorkerFailed(what="calibrate"):
+                    self.cal_note.configure(text=line)
+                    self.cal_button.configure(state="normal")
+                case WorkerFailed():
+                    self._meter_error = line
+
+    def _verify_finished(self) -> None:
+        self.verify_button.configure(state="normal")
+        if self._meter_was_on:
+            self._meter_was_on = False
+            self.p.start_meter(self._selected_device())

@@ -36,6 +36,16 @@ X11_NAMES: dict[str, str] = {
     **_X11_SPECIAL,
 }
 
+# Keysym values: printable ASCII keysyms equal their character codes.
+KEYSYMS: dict[str, int] = {
+    **{k: ord(k) for k in _LETTERS + _DIGITS + _PUNCT},
+    **{f"f{i}": 0xFFBE + i - 1 for i in range(1, 13)},
+    "space": 0x20,
+    "enter": 0xFF0D,
+    "tab": 0xFF09,
+    "escape": 0xFF1B,
+}
+
 _VK_SPECIAL = {
     "space": 0x20,
     "enter": 0x0D,

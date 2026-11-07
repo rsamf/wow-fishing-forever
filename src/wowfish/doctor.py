@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 from wowfish import __version__, paths
-from wowfish.capture import find_window
+from wowfish.capture import find_window, linux_hyprland
 
 Level = Literal["ok", "warn", "fail"]
 
@@ -68,18 +69,24 @@ def _x_display_opens() -> tuple[bool, str]:
 def probe_display() -> ProbeResult:
     if sys.platform != "linux":
         return ProbeResult("display", "ok", "native")
+    wayland = "Hyprland (native Wayland windows supported)" if linux_hyprland() else ""
     name = os.environ.get("DISPLAY")
     if not name:
+        if wayland:
+            return ProbeResult("display", "ok", f"{wayland}, no Xwayland")
         return ProbeResult(
             "display",
             "warn",
-            "DISPLAY is not set; the bot needs X11 or Xwayland (log into a session with one)",
+            "DISPLAY is not set; the bot needs X11, Xwayland, or Hyprland "
+            "(log into a session with one)",
         )
     ok, why = _x_display_opens()
     if not ok:
+        if wayland:
+            return ProbeResult("display", "ok", f"{wayland}; cannot open {name}: {why}")
         return ProbeResult("display", "fail", f"cannot open {name}: {why}")
     server = "Xwayland" if os.environ.get("WAYLAND_DISPLAY") else "X11"
-    return ProbeResult("display", "ok", f"{name} ({server})")
+    return ProbeResult("display", "ok", f"{name} ({server})" + (f", {wayland}" if wayland else ""))
 
 
 def probe_opencv() -> ProbeResult:
@@ -119,9 +126,14 @@ def probe_game_window() -> ProbeResult:
     w = find_window("World of Warcraft")
     if w is None:
         return ProbeResult("game window", "warn", "not found; is the game running?")
-    return ProbeResult(
-        "game window", "ok", f"{w.title!r} {w.width}x{w.height} at +{w.left}+{w.top}"
-    )
+    detail = f"{w.title!r} {w.width}x{w.height} at +{w.left}+{w.top}"
+    if w.compositor:
+        from wowfish.capture._wayland import GRIM
+
+        detail += f" (native Wayland on {w.compositor}, scale {w.scale:g})"
+        if shutil.which(GRIM) is None:
+            return ProbeResult("game window", "fail", f"{detail}; install grim to capture it")
+    return ProbeResult("game window", "ok", detail)
 
 
 def _xtest_available() -> tuple[bool, str]:
@@ -130,9 +142,19 @@ def _xtest_available() -> tuple[bool, str]:
     return xtest_available()
 
 
+def _virtual_keyboard_available() -> tuple[bool, str]:
+    from wowfish.input._wayland import virtual_keyboard_available
+
+    return virtual_keyboard_available()
+
+
 def probe_input() -> ProbeResult:
     if sys.platform == "win32":
         return ProbeResult("input", "ok", "SendInput")
+    w = find_window("World of Warcraft") if linux_hyprland() else None
+    if (w is not None and w.compositor) or (linux_hyprland() and not os.environ.get("DISPLAY")):
+        ok, detail = _virtual_keyboard_available()
+        return ProbeResult("input", "ok" if ok else "fail", detail)
     if sys.platform == "linux" and os.environ.get("DISPLAY"):
         ok, detail = _xtest_available()
         return ProbeResult("input", "ok" if ok else "fail", detail)

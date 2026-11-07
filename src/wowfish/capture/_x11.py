@@ -93,7 +93,23 @@ def _libx11() -> Any:
     return lib
 
 
-def find_window_x11(title_substring: str) -> WindowRef | None:
+def _xres_pid(d: Any, window: int) -> int | None:
+    """The pid the X server itself records for the window's client (X-Resource extension)."""
+    try:
+        from Xlib.ext import res
+
+        reply = d.res_query_client_ids([{"client": window, "mask": res.LocalClientPIDMask}])
+    except Exception:  # no X-Resource on this server
+        return None
+    return next((int(i.value[0]) for i in reply.ids if i.value), None)
+
+
+def find_window_x11(title_substring: str, pid: int | None = None) -> WindowRef | None:
+    """The largest viewable match, among those of process `pid` when any of them is.
+
+    Hyprland reports a pid from _NET_WM_PID or from the X server's record, and the two differ
+    when the game runs in a container with its own pid namespace, so either one counts.
+    """
     from Xlib import X, display
 
     d = display.Display()
@@ -128,9 +144,9 @@ def find_window_x11(title_substring: str) -> WindowRef | None:
                     if attrs.map_state == X.IsViewable:
                         origin = root.translate_coords(child, 0, 0)
                         pid_prop = child.get_full_property(pid_atom, 0)
-                        pid = int(pid_prop.value[0]) if pid_prop and pid_prop.value else None
+                        wm_pid = int(pid_prop.value[0]) if pid_prop and pid_prop.value else None
                         ref = WindowRef(
-                            title, pid, origin.x, origin.y, geo.width, geo.height, child.id
+                            title, wm_pid, origin.x, origin.y, geo.width, geo.height, child.id
                         )
                         matches.append((ref, ancestors))
                 visit(child, [*ancestors, child.id])
@@ -139,6 +155,9 @@ def find_window_x11(title_substring: str) -> WindowRef | None:
         # A window-manager frame repeats the client's title; prefer the client (the descendant).
         ancestor_ids = {a for _, ancestors in matches for a in ancestors}
         clients = [ref for ref, _ in matches if ref.handle not in ancestor_ids]
+        if pid is not None:
+            owned = [r for r in clients if pid in (r.pid, _xres_pid(d, r.handle or 0))]
+            clients = owned or clients
         if not clients:
             return None
         return max(clients, key=lambda r: r.width * r.height)
