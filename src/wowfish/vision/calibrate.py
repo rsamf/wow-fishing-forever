@@ -11,7 +11,9 @@ from wowfish.vision.matcher import GOLD_MIN, NO_MATCH, IconMatch, IconMatcher
 from wowfish.vision.region import Region
 from wowfish.vision.template import IconTemplate, template_for_size
 
-PROBE_SIZES: tuple[int, ...] = (20, 32, 48, 72, 104)
+# Dense enough that every size is within ~15% of a probe: a gear's score falls >= 0.25 at 0.8x
+# its size (see OFF_SCALE), so a sparse grid (20, 32, ...) missed a 26 px gear entirely.
+PROBE_SIZES: tuple[int, ...] = (18, 20, 23, 26, 30, 35, 42, 50, 60, 72, 88, 104)
 MIN_SIZE = 18  # below this the gear is a blob; 1080p draws it at ~21 px, 720p is out of scope
 SIZE_PENALTY = 1.0  # chance-level correction: tiny templates score high on any gold ring
 ANCHORS = 3
@@ -19,7 +21,7 @@ MIN_VALID_SCORE = 0.75  # real gears score 0.8-0.95; skin and UI gold at the wro
 # A real gear's score peaks sharply by size: at 0.8x and 1.25x the right side it drops >= 0.25.
 # A warm blob (skin, hair, a gold ring) scores about the same at every size (drop <= 0.10).
 OFF_SCALE = (0.8, 1.25)
-PROMINENCE_MIN = 0.15
+PROMINENCE_MIN = 0.25  # real gears 0.33-0.41; gold UI icons reached 0.16
 
 
 @dataclass(frozen=True)

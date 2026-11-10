@@ -16,7 +16,7 @@ class IconTemplate:
     native_size: int  # sprite the pixels came from: 29 | 42 | 53 | 79 | 103
     size: int  # side in pixels after resizing
     bgr: np.ndarray  # (size, size, 3) uint8
-    mask: np.ndarray  # (size, size) uint8, 255 where the sprite is opaque
+    mask: np.ndarray  # (size, size) uint8, 255 where the sprite is fully opaque
 
 
 def load_icon_templates() -> tuple[IconTemplate, ...]:
@@ -26,7 +26,10 @@ def load_icon_templates() -> tuple[IconTemplate, ...]:
         if rgba is None or rgba.ndim != 3 or rgba.shape[2] != 4:
             raise FileNotFoundError(f"missing or non-RGBA icon asset: {icon_path(n)}")
         bgr = np.ascontiguousarray(rgba[:, :, :3])
-        mask = (rgba[:, :, 3] > 0).astype(np.uint8) * 255
+        # Fully opaque pixels only: the sprite carries a soft dark drop shadow (alpha 1-254,
+        # ~40% of its box) that the game blends into the scene. Over bright water that shadow is
+        # barely visible, and matching it capped a real gear at ~0.57 so a UI ring won.
+        mask = (rgba[:, :, 3] == 255).astype(np.uint8) * 255
         out.append(IconTemplate(n, n, bgr, mask))
     return tuple(out)
 
