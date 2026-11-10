@@ -13,7 +13,7 @@ dependencies = [
   "loguru>=0.7,<1",
   "numpy>=2.5,<3",
   "tomli-w>=1.2,<2",
-  "opencv-python-headless>=4.10,<5",
+  "opencv-python-headless>=4.10,<6",
   "soundcard>=0.4,<1",
   "mss>=10.2.0",
   "python-xlib>=0.33 ; sys_platform == 'linux'",
