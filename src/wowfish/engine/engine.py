@@ -202,6 +202,9 @@ class FishingEngine:
                 return  # the next step stops or pauses before anything else is pressed
             now = self._clock()
         key = self.cfg.game.cast_key
+        clear = getattr(self.audio, "clear", None)
+        if clear is not None:  # a pause, break, or jump left audio queued; hear this cast live
+            clear()
         self._press(key, "cast")
         self.stats = ev.Stats(
             self._t(), self.stats.casts + 1, self.stats.catches, self.stats.misses,

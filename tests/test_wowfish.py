@@ -357,6 +357,7 @@ class _Pond:
         self.focused = True
         self.pressed: list[tuple[float, str, float]] = []  # time, key, hold
         self.bites: list[float] = []
+        self.cleared: list[float] = []  # when the engine dropped the buffered audio
 
     def clock(self) -> float:
         return self.t
@@ -387,6 +388,10 @@ class _Pond:
     def read(self, n: int) -> np.ndarray:
         return np.zeros(n, np.float32)
 
+    def clear(self) -> int:
+        self.cleared.append(self.t)
+        return 0
+
     def feed(self, chunk) -> list[BiteEvent]:
         if not self.bobber:
             return []
@@ -416,8 +421,9 @@ def _fish(
 
 
 def test_fishing_loop_varies_its_rhythm_only_when_asked():
-    """Out of the box every press holds run.key_hold_ms and nothing but cast and Interact is
-    pressed. Each [behavior] setting, once filled in, shows in the presses:
+    """Out of the box every press holds run.key_hold_ms, nothing but cast and Interact is
+    pressed, and each cast first drops the audio buffered while waiting, so the splash is heard
+    when it happens. Each [behavior] setting, once filled in, shows in the presses:
     - breaks: after the fishing stretch the loop rests for the whole break
     - reaction: Interact waits out the reaction time after the splash
     - skipped bites: some splashes get no Interact
@@ -427,6 +433,7 @@ def test_fishing_loop_varies_its_rhythm_only_when_asked():
     pond, _ = _fish(BehaviorConfig(), 1)
     assert {k for _, k, _ in pond.pressed} == {"1", "f"}
     assert {h for *_, h in pond.pressed} == {RunConfig().key_hold_ms / 1000}
+    assert pond.cleared == [t for t, k, _ in pond.pressed if k == "1"]
 
     behavior = BehaviorConfig(
         break_every_min_minutes=1,
