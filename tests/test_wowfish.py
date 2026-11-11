@@ -1,7 +1,8 @@
-"""Nine checks that protect what the bot actually relies on: the shipped assets, the default
+"""Eleven checks that protect what the bot actually relies on: the shipped assets, the default
 config, logging in the console-less GUI executable, that the two detectors say yes to the real
 thing and no to nothing, that the game window is picked correctly from the compositor's
-replies and from macOS's window list, and that macOS listens to BlackHole.
+replies and from macOS's window list, that macOS listens to BlackHole, and that the fishing
+loop varies its rhythm, or quits the game when time is up, only when the config asks it to.
 
 Everything here runs on bundled files and synthetic signals. No screen, audio device, window
 system, or Tk is touched, so a failure means the code or the assets changed, not the machine.
@@ -9,6 +10,7 @@ system, or Tk is touched, so a failure means the code or the assets changed, not
 
 from __future__ import annotations
 
+import random
 import subprocess
 import sys
 from contextlib import nullcontext
@@ -24,27 +26,30 @@ from wowfish.audio import AudioChunk, devices
 from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
-from wowfish.capture import _quartz, _wayland, _x11
+from wowfish.capture import WindowRef, _quartz, _wayland, _x11
 from wowfish.capture._quartz import frontmost_pid, pick_quartz_window
 from wowfish.capture._wayland import pick_hyprland_window
 from wowfish.cli import _setup_logging
 from wowfish.config import (
     AudioConfig,
+    BehaviorConfig,
     Config,
     GameConfig,
+    RunConfig,
     VisionConfig,
     ensure_config_file,
     load_config,
     save_config,
 )
-from wowfish.engine.engine import unsupported_platform
+from wowfish.engine.engine import FishingEngine, unsupported_platform
+from wowfish.engine.state import State
 from wowfish.errors import PermissionMissing
-from wowfish.gui.presenter import Presenter
+from wowfish.gui.presenter import Presenter, describe
 from wowfish.input import _quartz as input_quartz
 from wowfish.input import get_input_device
 from wowfish.input._wayland import keycodes_from_keymap
 from wowfish.input.keys import MAC_KEYCODES, SUPPORTED_KEYS
-from wowfish.vision.matcher import IconMatcher
+from wowfish.vision.matcher import IconMatch, IconMatcher
 from wowfish.vision.template import load_icon_templates, template_for_size
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -338,3 +343,169 @@ def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
     p.save_audio_device(p.default_device().id)
     assert (p.cfg.audio.capture, p.cfg.audio.device) == ("device", "BlackHole 16ch")
     assert devices.MAC_NO_GAME_AUDIO not in p.prerequisites()
+
+
+class _Pond:
+    """A game in which every cast lands a bobber that bites `bite_after_s` later and Interact
+    clears it. The quit key "0" closes the window 20 s after a press, once `ignored_quits`
+    presses have gone unanswered. Fills in for the clock, window lookup, capturer, keyboard,
+    matcher, audio, and detector; time moves when the engine sleeps, and 10 ms per audio read
+    (one pass of the loop)."""
+
+    def __init__(self, bite_after_s: float = 0.0, ignored_quits: int = 0) -> None:
+        self.t = 0.0
+        self.sample_rate = RATE
+        self.bobber = False
+        self.cast_at = 0.0
+        self.bite_after_s = bite_after_s
+        self.ignored_quits = ignored_quits
+        self.closes_at = float("inf")
+        self.window = WindowRef("World of Warcraft", None, 0, 0, 10, 10)
+        self.focused = True
+        self.pressed: list[tuple[float, str, float]] = []  # time, key, hold
+        self.bites: list[float] = []
+        self.cleared: list[float] = []  # when the engine dropped the buffered audio
+
+    def clock(self) -> float:
+        return self.t
+
+    def sleep(self, s: float) -> None:
+        self.t += s
+
+    def open(self, window) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def grab(self, box=None) -> np.ndarray:
+        return np.zeros((10, 10, 3), np.uint8)
+
+    def match(self, frame, region=None, full_width=None) -> IconMatch:
+        return IconMatch(0.9 if self.bobber else 0.0, 5, 5, 4, 1.0)
+
+    def press_key(self, key: str, hold_s: float) -> None:
+        self.pressed.append((self.t, key, hold_s))
+        if key in ("1", "f"):
+            self.bobber = key == "1"
+            self.cast_at = self.t
+        if key == "0":
+            self.ignored_quits -= 1
+            if self.ignored_quits < 0:
+                self.closes_at = min(self.closes_at, self.t + 20)
+
+    def find(self, title: str) -> WindowRef | None:
+        return None if self.t >= self.closes_at else self.window
+
+    def is_game_focused(self, window) -> bool:
+        return self.focused
+
+    def read(self, n: int) -> np.ndarray:
+        self.t += 0.01
+        return np.zeros(n, np.float32)
+
+    def clear(self) -> int:
+        self.cleared.append(self.t)
+        return 0
+
+    def feed(self, chunk) -> list[BiteEvent]:
+        if not self.bobber or self.t - self.cast_at < self.bite_after_s:
+            return []
+        self.bites.append(self.t)
+        return [BiteEvent("fishingbobber_1", 0.9, 0.0)]
+
+    def reset(self) -> None:
+        pass
+
+
+def _fish(
+    behavior: BehaviorConfig,
+    minutes: float,
+    game: GameConfig | None = None,
+    pond: _Pond | None = None,
+) -> tuple[_Pond, list[str]]:
+    """Fish for `minutes`, or until the session limit in `game` stops the engine."""
+    pond = pond or _Pond()
+    cfg = Config(game=game or GameConfig(), vision=VisionConfig(), audio=AudioConfig(),
+                 behavior=behavior)  # fmt: skip
+    engine = FishingEngine(
+        cfg, pond.window,
+        capturer=pond, input_device=pond, audio_source=pond, detector=pond, matcher=pond,
+        find_window=pond.find, clock=pond.clock, sleep=pond.sleep, rng=random.Random(7),
+    )  # fmt: skip
+    while pond.t < minutes * 60 and engine.state is not State.STOPPED:
+        engine.step()
+    return pond, [describe(e) for e in engine.events.queue]
+
+
+def test_fishing_loop_varies_its_rhythm_only_when_asked():
+    """Out of the box every press holds run.key_hold_ms, nothing but cast and Interact is
+    pressed, and each cast first drops the audio buffered while waiting, so the splash is heard
+    when it happens. Each [behavior] setting, once filled in, shows in the presses:
+    - breaks: after the fishing stretch the loop rests for the whole break
+    - reaction: Interact waits out the reaction time after the splash
+    - skipped bites: some splashes get no Interact
+    - key holds: they vary within the jitter
+    - jumps: every cast follows a jump, once the character has landed
+    """
+    pond, _ = _fish(BehaviorConfig(), 1)
+    assert {k for _, k, _ in pond.pressed} == {"1", "f"}
+    assert {h for *_, h in pond.pressed} == {RunConfig().key_hold_ms / 1000}
+    assert pond.cleared == [t for t, k, _ in pond.pressed if k == "1"]
+
+    behavior = BehaviorConfig(
+        break_every_min_minutes=1,
+        break_every_max_minutes=1,
+        break_min_minutes=2,
+        break_max_minutes=2,
+        reaction_min_ms=200,
+        reaction_max_ms=400,
+        skip_bite_chance=0.3,
+        key_hold_jitter_ms=20,
+        jump_chance=1,
+    )
+    pond, lines = _fish(behavior, 5)
+    gaps = [b[0] - a[0] for a, b in zip(pond.pressed, pond.pressed[1:], strict=False)]
+    assert max(gaps) >= 120
+    assert any("Taking a 2.0 min break" in line for line in lines)
+    for t in (t for t, key, _ in pond.pressed if key == "f"):
+        heard = max(b for b in pond.bites if b <= t)
+        assert 0.2 - 1e-9 <= t - heard <= 0.4 + 1e-9
+    assert 0 < [k for _, k, _ in pond.pressed].count("f") < len(pond.bites)
+    assert any("Let this bite go on purpose" in line for line in lines)
+    holds = {h for *_, h in pond.pressed}
+    assert len(holds) > 1 and all(0.04 <= h <= 0.08 for h in holds)
+    assert pond.pressed[0][1] == "space"
+    for (jumped_at, before, _), (t, key, _) in zip(pond.pressed, pond.pressed[1:], strict=False):
+        if key == "1":
+            assert before == "space" and t - jumped_at >= 1.0
+
+
+def test_session_limit_quits_the_game_only_when_asked():
+    """When the time limit runs out mid-cast with a quit key set, that cast still ends in
+    Interact; only then is the key pressed, and the bot stops once the game window is gone. A
+    press the game ignores is repeated, 3 presses at most. Without a quit key, or with the game
+    not focused, the bot only stops."""
+    game = GameConfig(session_minutes=1, quit_key="0")
+    pond, lines = _fish(BehaviorConfig(), 5, game, _Pond(bite_after_s=15))
+    keys = [k for _, k, _ in pond.pressed]
+    (last_cast, *_), (interact, *_), (quit_at, *_) = pond.pressed[-3:]
+    assert keys[-3:] == ["1", "f", "0"] and keys.count("0") == 1
+    assert last_cast < 60 < interact <= quit_at
+    assert "The game closed. Stopping." in lines and lines[-1] == "Stopped (session limit)"
+
+    pond, lines = _fish(BehaviorConfig(), 5, game, _Pond(ignored_quits=1))
+    assert [k for _, k, _ in pond.pressed].count("0") == 2
+    assert lines[-1] == "Stopped (session limit)"
+    pond, lines = _fish(BehaviorConfig(), 5, game, _Pond(ignored_quits=9))
+    assert [k for _, k, _ in pond.pressed].count("0") == 3
+    assert any("the game is still open" in line for line in lines)
+
+    pond, _ = _fish(BehaviorConfig(), 5, GameConfig(session_minutes=1))
+    assert "0" not in {k for _, k, _ in pond.pressed}
+
+    pond = _Pond()
+    pond.focused = False
+    pond, lines = _fish(BehaviorConfig(), 5, game, pond)
+    assert pond.pressed == []
+    assert any("left it running" in line for line in lines)

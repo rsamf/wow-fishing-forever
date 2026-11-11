@@ -21,6 +21,8 @@ CHECKLIST = (
     "  3. Enable Auto Loot (Options > Controls).\n"
     "  4. Type /console SoftTargetIconGameObject 1 once (shows the gold gear over the bobber).\n"
     "  5. Set Ambience and Music to 0 so the splash is easy to hear.\n"
+    "  6. Optional: put a macro with /quit on an action bar key and enter it as the quit key;\n"
+    "     when the time limit below runs out, the bot presses it to close the game.\n"
     "Then press Start on the Fish tab. The first cast of every run measures the gear icon, so\n"
     "the bite check and the calibration below are optional: use them when fishing misbehaves."
 )
@@ -49,11 +51,29 @@ class SetupPage:
         self.interact = tb.Entry(keys_row, width=8)
         self.interact.insert(0, presenter.cfg.game.interact_key)
         self.interact.grid(row=0, column=3, padx=6)
+        tb.Label(keys_row, text="Quit key").grid(row=0, column=4, sticky="w")
+        self.quit = tb.Entry(keys_row, width=8)
+        self.quit.insert(0, presenter.cfg.game.quit_key)
+        self.quit.grid(row=0, column=5, padx=6)
         tb.Button(keys_row, text="Save keys", command=self._save_keys, bootstyle="secondary").grid(
-            row=0, column=4, padx=6
+            row=0, column=6, padx=6
         )
         self.keys_note = tb.Label(keys_row, text="")
-        self.keys_note.grid(row=0, column=5, sticky="w")
+        self.keys_note.grid(row=0, column=7, sticky="w")
+
+        limit = tb.Labelframe(f, text="Time limit", padding=8)
+        limit.pack(fill="x", pady=4)
+        tb.Label(limit, text="Stop after").pack(side="left")
+        self.minutes = tb.Spinbox(limit, from_=0, to=1440, increment=15, width=5)
+        self.minutes.set(presenter.cfg.game.session_minutes)
+        self.minutes.pack(side="left", padx=6)
+        self.minutes.bind("<Return>", lambda _e: self._save_limit())
+        tb.Label(limit, text="min (0 = never)").pack(side="left")
+        tb.Button(limit, text="Save", command=self._save_limit, bootstyle="secondary").pack(
+            side="left", padx=6
+        )
+        self.limit_note = tb.Label(limit, text="")
+        self.limit_note.pack(side="left")
 
         audio = tb.Labelframe(f, text="Audio (what the bot hears) and bite check", padding=8)
         audio.pack(fill="x", pady=4)
@@ -125,10 +145,20 @@ class SetupPage:
 
     def _save_keys(self) -> None:
         try:
-            self.p.save_keys(self.cast.get(), self.interact.get())
+            self.p.save_keys(self.cast.get(), self.interact.get(), self.quit.get())
             self.keys_note.configure(text="saved")
         except ValueError as e:
             self.keys_note.configure(text=str(e))
+
+    def _save_limit(self) -> None:
+        try:
+            self.p.save_session_minutes(int(self.minutes.get()))
+        except ValueError:
+            self.limit_note.configure(text="enter whole minutes, 0 for never")
+            return
+        quit_key = self.p.cfg.game.quit_key
+        then = f"; then the bot presses {quit_key} to quit the game" if quit_key else ""
+        self.limit_note.configure(text=f"saved; used from the next Start{then}")
 
     def _selected_device(self) -> str | None:
         i = self.device.current()

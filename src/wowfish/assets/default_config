@@ -7,6 +7,10 @@ cast_key = "1"
 interact_key = "f"
 # Stop fishing after this many minutes. Set to 0 to run Forever!
 session_minutes = 0
+# Keybind of an action bar macro containing /quit. When session_minutes runs out, the bot
+# finishes the cast in hand, then presses it until the game window closes (3 tries at most).
+# Empty = leave the game running.
+quit_key = ""
 
 [vision]
 # On-screen size of the interact icon in pixels. 0 = not calibrated; `wowfish calibrate` sets it.
@@ -40,3 +44,24 @@ pause_min_s = 0.5
 pause_max_s = 2.0
 # How long each key is held down, in milliseconds.
 key_hold_ms = 60
+
+[behavior]
+# Variations so the bot does not keep the exact same rhythm. All of them are off by default.
+# Take a break after fishing for a random number of minutes between these two.
+# 0 = never take a break.
+break_every_min_minutes = 0.0
+break_every_max_minutes = 0.0
+# How long each break lasts, in minutes, picked at random between these two.
+break_min_minutes = 0.0
+break_max_minutes = 0.0
+# Wait a random number of milliseconds between these two after hearing the splash, before
+# pressing Interact. Keep it under a second or so, or the fish gets away.
+reaction_min_ms = 0
+reaction_max_ms = 0
+# Chance (0..1) of letting a bite go on purpose, as if it was missed.
+skip_bite_chance = 0.0
+# Hold each key for run.key_hold_ms, give or take up to this many milliseconds.
+key_hold_jitter_ms = 0
+# Chance (0..1) of jumping in place before a cast, and the Jump keybind.
+jump_chance = 0.0
+jump_key = "space"

@@ -12,6 +12,7 @@ import tomli_w
 
 from wowfish import paths
 from wowfish.assets import default_config_path
+from wowfish.input.keys import is_supported_key
 
 _LINE_RE = re.compile(r"\(at line (\d+), column \d+\)")
 
@@ -33,6 +34,7 @@ class GameConfig:
     cast_key: str = "1"
     interact_key: str = "f"
     session_minutes: int = 0
+    quit_key: str = ""  # an action bar /quit macro, pressed when session_minutes runs out
 
 
 @dataclass(frozen=True)
@@ -67,11 +69,26 @@ class RunConfig:
 
 
 @dataclass(frozen=True)
+class BehaviorConfig:
+    break_every_min_minutes: float = 0.0
+    break_every_max_minutes: float = 0.0  # 0 = never take a break
+    break_min_minutes: float = 0.0
+    break_max_minutes: float = 0.0
+    reaction_min_ms: int = 0
+    reaction_max_ms: int = 0
+    skip_bite_chance: float = 0.0
+    key_hold_jitter_ms: int = 0
+    jump_chance: float = 0.0
+    jump_key: str = "space"
+
+
+@dataclass(frozen=True)
 class Config:
     game: GameConfig
     vision: VisionConfig
     audio: AudioConfig
     run: RunConfig = field(default_factory=RunConfig)
+    behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
 
 
 _SECTIONS: dict[str, type] = {
@@ -79,6 +96,7 @@ _SECTIONS: dict[str, type] = {
     "vision": VisionConfig,
     "audio": AudioConfig,
     "run": RunConfig,
+    "behavior": BehaviorConfig,
 }
 
 
@@ -152,6 +170,8 @@ def _validate(path: Path, cfg: Config) -> None:
             raise ConfigError(path, f"{key} {rule}")
 
     check(cfg.game.session_minutes >= 0, "game.session_minutes", "must be 0 (forever) or positive")
+    q = cfg.game.quit_key
+    check(not q or is_supported_key(q), "game.quit_key", "must be empty or a supported key name")
     v, a = cfg.vision, cfg.audio
     check(0.0 < v.icon_threshold <= 1.0, "vision.icon_threshold", "must be in (0, 1]")
     check(v.match_width >= 320, "vision.match_width", "must be at least 320")
@@ -167,6 +187,22 @@ def _validate(path: Path, cfg: Config) -> None:
     check(r.pause_min_s >= 0, "run.pause_min_s", "must be 0 or positive")
     check(r.pause_min_s <= r.pause_max_s, "run.pause_min_s", "must not exceed run.pause_max_s")
     check(10 <= r.key_hold_ms <= 500, "run.key_hold_ms", "must be between 10 and 500")
+    b = cfg.behavior
+    for lo, hi in (
+        ("break_every_min_minutes", "break_every_max_minutes"),
+        ("break_min_minutes", "break_max_minutes"),
+        ("reaction_min_ms", "reaction_max_ms"),
+    ):
+        check(getattr(b, lo) >= 0, f"behavior.{lo}", "must be 0 or positive")
+        check(getattr(b, lo) <= getattr(b, hi), f"behavior.{lo}", f"must not exceed behavior.{hi}")
+    check(0.0 <= b.skip_bite_chance < 1.0, "behavior.skip_bite_chance", "must be in [0, 1)")
+    check(0.0 <= b.jump_chance <= 1.0, "behavior.jump_chance", "must be in [0, 1]")
+    check(
+        b.key_hold_jitter_ms >= 0 and r.key_hold_ms - b.key_hold_jitter_ms >= 10,
+        "behavior.key_hold_jitter_ms",
+        "must be 0 or positive and leave run.key_hold_ms - jitter at 10 or more",
+    )
+    check(is_supported_key(b.jump_key), "behavior.jump_key", "must be a supported key name")
 
 
 def to_toml(cfg: Config) -> str:

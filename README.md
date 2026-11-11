@@ -134,6 +134,10 @@ Or run it from terminal:
 
 While the bot is running, keep the water in view and the game client in focus.
 
+To vary the bot's rhythm, fill in the `[behavior]` section of the config file (`wowfish config --path`): breaks after a stretch of fishing, a reaction delay before Interact, the odd bite let go on purpose, uneven key holds, and a jump before the occasional cast. It is all off by default.
+
+To close the game when the time limit runs out, make a macro with `/quit`, put it on an action bar key, and enter that key as the Quit key on the Setup tab (`quit_key` in the config file). Once the session is over, the bot lets the cast in hand finish, presses the key, and waits up to 30 s for the game window to close (away from an inn, logging out takes 20 s). If the window stays, it presses again, three times at most.
+
 ## Commands
 
 | command | what it does |

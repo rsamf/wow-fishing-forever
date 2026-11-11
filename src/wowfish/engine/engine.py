@@ -27,6 +27,7 @@ from wowfish.capture import (
 )
 from wowfish.config import Config
 from wowfish.engine import events as ev
+from wowfish.engine.behavior import Behavior
 from wowfish.engine.state import State
 from wowfish.vision.matcher import IconMatch
 from wowfish.vision.region import Region
@@ -41,6 +42,10 @@ LISTEN_EVERY_S = 2.0  # while waiting for the splash, say what is heard this oft
 SCORES_EVERY_S = 0.1  # ...and send each clip's peak score this often, for the GUI's graph
 SLEEP_SLICE_S = 0.1
 RESWEEP_AFTER_TIMEOUTS = 2  # icon timeouts in a row before the next cast measures the icon again
+JUMP_LANDING_S = (1.0, 1.5)  # Fishing cannot be cast mid-air; wait this long after a jump
+QUIT_WAIT_S = 30.0  # away from an inn, /quit counts down 20 s before the game closes
+QUIT_TRIES = 3  # quit key presses before giving up on closing the game
+BUSY = (State.CASTING, State.WAIT_BITE, State.INTERACT)  # a cast in hand
 
 
 class FishingEngine:
@@ -87,6 +92,7 @@ class FishingEngine:
         self._clock = clock
         self._sleep = sleep
         self._rng = rng or random.Random()
+        self.behavior = Behavior(cfg.behavior, cfg.run.key_hold_ms, self._rng)
         self.session_s = cfg.game.session_minutes * 60.0 if session_s is None else session_s
         self.box_interval_s = box_interval_s
         self.lost_after = lost_after
@@ -134,11 +140,15 @@ class FishingEngine:
         if self.started is None:
             self.started = now
             self._last_audio = now
+            self.behavior.start(now)
         if self._stop:
             self._finish("user")
             return
-        if self.session_s != 0 and now - self.started >= self.session_s:
-            self._finish("session limit")
+        if self._time_up() and not (self.cfg.game.quit_key and self.state in BUSY):
+            # with a quit key, the cast in hand finishes first (no new one starts): the quit
+            # comes between casts, not mid-cast or while looting
+            self._quit_game()
+            self._finish("user" if self._stop else "session limit")
             return
         try:
             self._step(now)
@@ -190,7 +200,16 @@ class FishingEngine:
                 self._sweeping = True  # the window changed size: measure the icon again
             if found is not None:
                 self.window = found
+        if self.behavior.jump():
+            self._press(self.cfg.behavior.jump_key, "jump")
+            self._wait(self._rng.uniform(*JUMP_LANDING_S))
+            if self._stop or self.input.is_game_focused(self.window) is False:
+                return  # the next step stops or pauses before anything else is pressed
+            now = self._clock()
         key = self.cfg.game.cast_key
+        clear = getattr(self.audio, "clear", None)
+        if clear is not None:  # a pause, break, or jump left audio queued; hear this cast live
+            clear()
         self._press(key, "cast")
         self.stats = ev.Stats(
             self._t(), self.stats.casts + 1, self.stats.catches, self.stats.misses,
@@ -261,6 +280,12 @@ class FishingEngine:
                 self.stats.bites_heard + 1, self._elapsed(),
             )  # fmt: skip
             self._emit(ev.BiteHeard(self._t(), bite.clip, float(bite.score)))
+            if self.behavior.skip_bite():
+                self._miss("Let this bite go on purpose")
+                return
+            self._wait(self.behavior.reaction_s())
+            if self._stop:
+                return
             if self.input.is_game_focused(self.window) is False:
                 self._resume_state = State.WAIT_BITE
                 self.state = State.PAUSED
@@ -268,7 +293,7 @@ class FishingEngine:
                 return
             key = self.cfg.game.interact_key
             self._press(key, "bite")
-            self._t_interact = now
+            self._t_interact = self._clock()
             self._last_box_grab = -math.inf
             self._change(
                 State.INTERACT,
@@ -324,8 +349,61 @@ class FishingEngine:
         self._misses += 1
         return False
 
+    def _time_up(self) -> bool:
+        return self.session_s != 0 and self._elapsed() >= self.session_s
+
+    def _quit_game(self) -> None:
+        """Press the key of the player's /quit macro, if one is set, and wait for the game
+        window to close; press it again while the window stays, QUIT_TRIES times in all."""
+        key, find = self.cfg.game.quit_key, self._find_window
+        if not key:
+            return
+        try:
+            for _ in range(QUIT_TRIES):
+                if self.input.is_game_focused(self.window) is False:
+                    self._emit(
+                        ev.Error(
+                            self._t(), "time is up, but the game is not focused; left it running"
+                        )
+                    )
+                    return
+                self._press(key, "quit")
+                if find is None:
+                    return  # nothing to watch the window with
+                self._change(
+                    State.IDLE,
+                    f"Time is up; pressed {key} to quit the game",
+                    f"Waiting up to {QUIT_WAIT_S:g} s for the game to close",
+                )
+                if self._wait_for_game_to_close(find):
+                    self._change(State.IDLE, "The game closed", "Stopping")
+                    return
+                if self._stop:
+                    return
+            self._emit(
+                ev.Error(
+                    self._t(),
+                    f"pressed {key} {QUIT_TRIES} times, but the game is still open; "
+                    "is the /quit macro on that key?",
+                )
+            )
+        except Exception as e:
+            self._emit(ev.Error(self._t(), f"could not quit the game: {type(e).__name__}: {e}"))
+
+    def _wait_for_game_to_close(self, find: Callable[..., WindowRef | None]) -> bool:
+        """Look for the game window every second for up to QUIT_WAIT_S; True once it is gone."""
+        deadline = self._clock() + QUIT_WAIT_S
+        while not self._stop:
+            found = find("World of Warcraft")
+            if found is None or (found.handle, found.pid) != (self.window.handle, self.window.pid):
+                return True  # nothing left, or only another window with the title
+            if self._clock() >= deadline:
+                return False
+            self._wait(1.0)
+        return False
+
     def _press(self, key: str, why: str) -> None:
-        self.input.press_key(key, self.cfg.run.key_hold_ms / 1000.0)
+        self.input.press_key(key, self.behavior.hold_s())
         self._emit(ev.KeyPressed(self._t(), key, why))
 
     def _miss(self, did: str) -> None:
@@ -337,9 +415,22 @@ class FishingEngine:
 
     def _pause_then_idle(self, did: str) -> None:
         pause = self._rng.uniform(self.cfg.run.pause_min_s, self.cfg.run.pause_max_s)
-        self._change(State.IDLE, did, f"Casting again in {pause:.1f} s")
+        rest = self.behavior.break_s(self._clock())
+        if rest > 0 and self.session_s != 0:  # a break never outlasts the session
+            rest = min(rest, max(0.0, self.session_s - self._elapsed()))
+        if self._time_up():
+            nxt = "Time is up; quitting the game" if self.cfg.game.quit_key else "Time is up"
+        elif rest > 0:
+            nxt = f"Taking a {rest / 60:.1f} min break, then casting again"
+        else:
+            nxt = f"Casting again in {pause:.1f} s"
+        self._change(State.IDLE, did, nxt)
         self._icon_xy = None
-        remaining = pause
+        self._wait(rest + pause)
+
+    def _wait(self, seconds: float) -> None:
+        """Sleep in short slices so Stop still ends the run promptly."""
+        remaining = seconds
         while remaining > 0 and not self._stop:
             step = min(SLEEP_SLICE_S, remaining)
             self._sleep(step)

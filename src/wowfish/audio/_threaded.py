@@ -55,6 +55,14 @@ class ThreadedSource:
         except BaseException as e:  # surface on the next read instead of dying silently
             self.error = e
 
+    def clear(self) -> int:
+        """Drop everything buffered so far; return how many frames were dropped."""
+        with self._lock:
+            dropped = self._frames
+            self._chunks.clear()
+            self._frames = 0
+        return dropped
+
     def read(self, n_frames: int) -> np.ndarray:
         """Up to n_frames of buffered audio, immediately; empty when nothing has arrived."""
         if self.error is not None:

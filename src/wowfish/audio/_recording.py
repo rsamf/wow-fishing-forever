@@ -29,6 +29,11 @@ class RecordingSource:
             if self._chunks:
                 write_wav(self.path, np.concatenate(self._chunks), self.sample_rate)
 
+    def clear(self) -> int:
+        """Drop the inner source's backlog; the recording keeps only what the engine heard."""
+        clear = getattr(self.inner, "clear", None)
+        return clear() if clear is not None else 0
+
     def read(self, n_frames: int) -> np.ndarray:
         samples = self.inner.read(n_frames)
         if len(samples):
