@@ -34,6 +34,10 @@ def get_input_device(window: WindowRef | None = None) -> InputDevice:
         from wowfish.input._win32 import Win32InputDevice
 
         return Win32InputDevice()
+    if sys.platform == "darwin":
+        from wowfish.input._quartz import QuartzInputDevice
+
+        return QuartzInputDevice()
     from wowfish.input._stub import StubInputDevice
 
     return StubInputDevice()

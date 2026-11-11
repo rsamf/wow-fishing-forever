@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from wowfish import __version__, paths
-from wowfish.capture import find_window, linux_hyprland
+from wowfish.capture import find_window, linux_hyprland, macos
 
 Level = Literal["ok", "warn", "fail"]
 
@@ -66,7 +66,16 @@ def _x_display_opens() -> tuple[bool, str]:
         return False, f"{type(e).__name__}: {e}"
 
 
+def _screen_capture_available() -> tuple[bool, str]:
+    from wowfish.capture._quartz import screen_capture_available
+
+    return screen_capture_available()
+
+
 def probe_display() -> ProbeResult:
+    if macos():  # a permission, not a broken install: warn, so doctor still exits 0
+        ok, detail = _screen_capture_available()
+        return ProbeResult("display", "ok" if ok else "warn", f"native (Quartz); {detail}")
     if sys.platform != "linux":
         return ProbeResult("display", "ok", "native")
     wayland = "Hyprland (native Wayland windows supported)" if linux_hyprland() else ""
@@ -108,13 +117,29 @@ def probe_audio() -> ProbeResult:
             "warn",
             "no loopback devices (macOS: install a virtual device such as BlackHole)",
         )
+    if macos() and not any(d.is_default for d in found):
+        return ProbeResult(
+            "audio",
+            "warn",
+            f"{len(found)} input device(s) but no BlackHole; install it and route the game's "
+            "sound through it (see the README)",
+        )
     default = next((d.name for d in found if d.is_default), found[0].name)
     return ProbeResult("audio", "ok", f"{len(found)} loopback device(s), default: {default}")
 
 
 def probe_game_audio() -> ProbeResult:
     from wowfish.audio import AudioUnavailable, devices
+    from wowfish.config import ConfigError, load_config
 
+    if macos():  # no per-application capture: the bot listens to the configured device
+        try:
+            audio = load_config()[0].audio
+        except ConfigError as e:
+            return ProbeResult("game audio", "fail", str(e))
+        if audio.capture == "device":
+            return ProbeResult("game audio", "ok", f"device {audio.device or '(default)'!r}")
+        return ProbeResult("game audio", "warn", devices.MAC_NO_GAME_AUDIO)
     w = find_window("World of Warcraft")
     try:
         return ProbeResult("game audio", "ok", devices.describe_game_audio(w.pid if w else None))
@@ -148,9 +173,18 @@ def _virtual_keyboard_available() -> tuple[bool, str]:
     return virtual_keyboard_available()
 
 
+def _accessibility_available() -> tuple[bool, str]:
+    from wowfish.input._quartz import accessibility_available
+
+    return accessibility_available()
+
+
 def probe_input() -> ProbeResult:
     if sys.platform == "win32":
         return ProbeResult("input", "ok", "SendInput")
+    if macos():
+        ok, detail = _accessibility_available()
+        return ProbeResult("input", "ok" if ok else "warn", detail)
     w = find_window("World of Warcraft") if linux_hyprland() else None
     if (w is not None and w.compositor) or (linux_hyprland() and not os.environ.get("DISPLAY")):
         ok, detail = _virtual_keyboard_available()

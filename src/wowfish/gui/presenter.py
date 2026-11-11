@@ -4,6 +4,7 @@ engine thread and the setup workers (meter, calibration grab, bite recording). N
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -209,11 +210,16 @@ class Presenter:
         self.reload()
 
     def audio_devices(self) -> list[Any]:
-        """The game's own audio first (default), then the loopback monitors."""
+        """The game's own audio first (default), then the loopback monitors.
+
+        macOS cannot capture one app, so there it is the input devices, BlackHole first (default).
+        """
         try:
             monitors = self._list_devices()
         except AudioUnavailable:
             monitors = []
+        if sys.platform == "darwin":
+            return list(monitors)
         return [self._game_choice] + [self._device_type(d.id, d.name, False) for d in monitors]
 
     def default_device(self) -> Any | None:
@@ -260,15 +266,23 @@ class Presenter:
         self.reload()
         return threshold
 
-    def prerequisites(self) -> list[str]:
-        """What blocks Start, in plain words; empty when the bot can run."""
-        from wowfish.engine.engine import unsupported_platform
+    def prerequisites(self, request: bool = False) -> list[str]:
+        """What blocks Start, in plain words; empty when the bot can run.
+
+        `request` also asks macOS for missing permissions, which shows its prompt: Start passes
+        it, the check when the window opens does not.
+        """
+        from wowfish.audio.devices import MAC_NO_GAME_AUDIO
+        from wowfish.engine.engine import missing_permissions, unsupported_platform
         from wowfish.vision.matcher import MIN_TEMPLATE_PX
 
         reasons: list[str] = []
         problem = unsupported_platform()
         if problem:
             reasons.append(problem)
+        reasons += missing_permissions(request)
+        if sys.platform == "darwin" and self.cfg.audio.capture == self._game:
+            reasons.append(MAC_NO_GAME_AUDIO)
         window = self._find_window("World of Warcraft")
         if window is None and not problem:
             reasons.append("World of Warcraft window not found; is the game running?")
@@ -278,7 +292,12 @@ class Presenter:
             if px < MIN_TEMPLATE_PX:
                 reasons.append("the calibrated icon is too small for this window; recalibrate")
         if not self.audio_devices():
-            reasons.append("no loopback audio device found")
+            mac = sys.platform == "darwin"
+            reasons.append(
+                "no audio input device; install BlackHole"
+                if mac
+                else "no loopback audio device found"
+            )
         return reasons
 
     # -- the bot ----------------------------------------------------------------------------

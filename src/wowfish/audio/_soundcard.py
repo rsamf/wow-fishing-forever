@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 import numpy as np
@@ -16,9 +17,10 @@ class SoundcardSource:
         self._rec: Any = None
 
     def __enter__(self) -> SoundcardSource:
-        self._rec = self.mic.recorder(
-            samplerate=self.sample_rate, channels=1, blocksize=self.blocksize
-        )
+        # CoreAudio only takes a buffer inside the device's range (BlackHole: 15-512 frames) and
+        # soundcard raises rather than clamp. The buffer only sets latency; reads are any length.
+        blocksize = None if sys.platform == "darwin" else self.blocksize
+        self._rec = self.mic.recorder(samplerate=self.sample_rate, channels=1, blocksize=blocksize)
         self._rec.__enter__()
         return self
 

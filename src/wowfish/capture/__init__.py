@@ -46,12 +46,16 @@ def linux_hyprland() -> bool:
     return sys.platform == "linux" and bool(os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"))
 
 
+def macos() -> bool:
+    return sys.platform == "darwin"
+
+
 def find_window(title_substring: str = "World of Warcraft") -> WindowRef | None:
     """The largest viewable window whose title contains the text.
 
     On Hyprland the compositor picks it from all its windows, native Wayland and Xwayland alike;
-    an Xwayland winner is then looked up through X11 by its pid. Elsewhere X11, then Windows;
-    else None.
+    an Xwayland winner is then looked up through X11 by its pid. Elsewhere X11, then Windows,
+    then macOS (in points, which mss grabs as is); else None.
     """
     pid: int | None = None
     if linux_hyprland():
@@ -75,6 +79,10 @@ def find_window(title_substring: str = "World of Warcraft") -> WindowRef | None:
         from wowfish.capture import _win32
 
         return _win32.find_window_win32(title_substring)
+    if macos():
+        from wowfish.capture._quartz import find_window_quartz
+
+        return find_window_quartz(title_substring)
     return None
 
 
@@ -106,4 +114,5 @@ __all__ = [
     "get_capturer",
     "linux_hyprland",
     "linux_x11",
+    "macos",
 ]

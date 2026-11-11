@@ -1,7 +1,7 @@
-"""Seven checks that protect what the bot actually relies on: the shipped assets, the default
+"""Nine checks that protect what the bot actually relies on: the shipped assets, the default
 config, logging in the console-less GUI executable, that the two detectors say yes to the real
-thing and no to nothing, and that the game window is picked correctly from the compositor's
-replies.
+thing and no to nothing, that the game window is picked correctly from the compositor's
+replies and from macOS's window list, and that macOS listens to BlackHole.
 
 Everything here runs on bundled files and synthetic signals. No screen, audio device, window
 system, or Tk is touched, so a failure means the code or the assets changed, not the machine.
@@ -11,18 +11,21 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 from loguru import logger
 
 from wowfish import capture
 from wowfish.assets import CLIP_NAMES, ICON_SIZES
-from wowfish.audio import AudioChunk
+from wowfish.audio import AudioChunk, devices
 from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
-from wowfish.capture import _wayland, _x11
+from wowfish.capture import _quartz, _wayland, _x11
+from wowfish.capture._quartz import frontmost_pid, pick_quartz_window
 from wowfish.capture._wayland import pick_hyprland_window
 from wowfish.cli import _setup_logging
 from wowfish.config import (
@@ -34,7 +37,13 @@ from wowfish.config import (
     load_config,
     save_config,
 )
+from wowfish.engine.engine import unsupported_platform
+from wowfish.errors import PermissionMissing
+from wowfish.gui.presenter import Presenter
+from wowfish.input import _quartz as input_quartz
+from wowfish.input import get_input_device
 from wowfish.input._wayland import keycodes_from_keymap
+from wowfish.input.keys import MAC_KEYCODES, SUPPORTED_KEYS
 from wowfish.vision.matcher import IconMatcher
 from wowfish.vision.template import load_icon_templates, template_for_size
 
@@ -232,3 +241,100 @@ def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
     for symbols in (NAMED_SYMBOLS, HEX_SYMBOLS):
         codes = keycodes_from_keymap(KEYMAP % symbols)
         assert codes == {"1": 2, "f": 33, "enter": 28, "f1": 59}, symbols
+
+
+def test_macos_window_focus_and_keys(monkeypatch):
+    """CoreGraphics lists windows front to back, in points. The largest visible title match wins;
+    when macOS withholds titles (Screen Recording off) the app's name stands in. The front-most
+    visible app window owns the keyboard, whatever floats above it. On macOS the window lookup,
+    the platform check, and the input device all go through Quartz, every supported key has its
+    own keycode, and a key press without the Accessibility permission says so instead of being
+    dropped."""
+
+    def win(number, name, owner, pid, bounds, layer=0, alpha=1.0):
+        return {"number": number, "name": name, "owner": owner, "pid": pid, "layer": layer,
+                "alpha": alpha, "bounds": bounds}  # fmt: skip
+
+    infos = [
+        win(1, "", "Window Server", 90, (0, 0, 1512, 33), layer=25),  # the menu bar
+        win(2, None, "Terminal", 50, (100, 100, 800, 500)),
+        win(3, "World of Warcraft", "World of Warcraft", 77, (0, 33, 1512, 949)),
+        win(4, "World of Warcraft - Wowhead", "Safari", 60, (0, 0, 600, 400)),
+        win(5, "World of Warcraft", "World of Warcraft", 77, (0, 0, 4000, 3000), alpha=0.0),
+    ]
+    w = pick_quartz_window(infos, "world of warcraft")
+    assert w is not None
+    assert (w.title, w.pid, w.left, w.top, w.width, w.height, w.handle, w.scale) == (
+        "World of Warcraft", 77, 0, 33, 1512, 949, 3, 1.0,
+    )  # fmt: skip
+    hidden = pick_quartz_window([{**i, "name": None} for i in infos], "World of Warcraft")
+    assert hidden is not None and (hidden.title, hidden.handle) == ("World of Warcraft", 3)
+    assert pick_quartz_window(infos, "Hearthstone") is None
+    assert (frontmost_pid(infos), frontmost_pid(infos[2:])) == (50, 77)
+
+    assert set(MAC_KEYCODES) == set(SUPPORTED_KEYS)
+    assert len(set(MAC_KEYCODES.values())) == len(MAC_KEYCODES)
+    assert (MAC_KEYCODES["1"], MAC_KEYCODES["f"], MAC_KEYCODES["f1"]) == (0x12, 0x03, 0x7A)
+
+    posted: list[tuple[int, bool]] = []
+    cg = SimpleNamespace(
+        CGEventSourceCreate=lambda state: 1,
+        CGEventCreateKeyboardEvent=lambda source, code, down: (code, down),
+        CGEventSetFlags=lambda event, flags: None,
+        CGEventPost=lambda tap, event: posted.append(event),
+    )
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(_quartz, "window_infos", lambda: infos)
+    monkeypatch.setattr(_quartz, "frameworks", lambda: (cg, SimpleNamespace(CFRelease=id)))
+    assert capture.find_window() == w
+    assert unsupported_platform() == ""
+    keyboard = get_input_device(w)
+    assert isinstance(keyboard, input_quartz.QuartzInputDevice)
+    assert keyboard.is_game_focused(w) is False  # Terminal is in front
+    monkeypatch.setattr(input_quartz, "accessibility_available", lambda: (False, "Accessibility"))
+    try:
+        keyboard.press_key("f", 0)
+    except PermissionMissing as e:
+        assert str(e) == "Accessibility"
+    else:
+        raise AssertionError("pressed a key without the Accessibility permission")
+    monkeypatch.setattr(input_quartz, "accessibility_available", lambda: (True, ""))
+    keyboard.press_key("F", 0)
+    assert posted == [(0x03, True), (0x03, False)]
+
+
+def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
+    """macOS has no loopback capture, so the bot listens to an input device: BlackHole is listed
+    first and is the default, under its name (CoreAudio ids change across reboots), and an exact
+    id or name wins over one it is part of. It records with CoreAudio's own buffer size, since a
+    device such as BlackHole refuses the 1024 frames used elsewhere. The GUI offers no "game
+    only" choice there, and Start names the missing permission and the audio setting until both
+    are fixed."""
+    asked: list[dict] = []
+
+    def mic(id_, name):
+        return SimpleNamespace(id=id_, name=name, isloopback=False,
+                               recorder=lambda **kw: asked.append(kw) or nullcontext())  # fmt: skip
+
+    mics = [mic(4, "MacBook Pro Microphone"), mic(42, "BlackHole 16ch"), mic(43, "BlackHole 2ch")]
+    soundcard = SimpleNamespace(all_microphones=lambda: list(mics), default_speaker=lambda: None)
+    monkeypatch.setenv("WOWFISH_HOME", str(tmp_path))
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(devices, "_soundcard", lambda: soundcard)
+    found = [(d.id, d.is_default) for d in devices.list_loopback_devices()]
+    assert found == [("BlackHole 16ch", True), ("BlackHole 2ch", True),
+                     ("MacBook Pro Microphone", False)]  # fmt: skip
+    assert devices.open_loopback("BlackHole 2ch").mic is mics[2]
+    assert devices.open_loopback("blackhole").mic is mics[1]
+    assert devices.open_loopback("4").mic is mics[0]  # not BlackHole 16ch, whose id is 42
+    with devices.open_loopback("blackhole"):
+        assert asked == [{"samplerate": 22050, "channels": 1, "blocksize": None}]
+
+    monkeypatch.setattr(_quartz, "screen_capture_available", lambda request: (True, ""))
+    monkeypatch.setattr(input_quartz, "accessibility_available", lambda request: (False, "AX off"))
+    p = Presenter(find_window=lambda _: None)
+    assert [d.id for d in p.audio_devices()] == [m.name for m in mics[1:] + mics[:1]]
+    assert p.prerequisites()[:2] == ["AX off", devices.MAC_NO_GAME_AUDIO]
+    p.save_audio_device(p.default_device().id)
+    assert (p.cfg.audio.capture, p.cfg.audio.device) == ("device", "BlackHole 16ch")
+    assert devices.MAC_NO_GAME_AUDIO not in p.prerequisites()

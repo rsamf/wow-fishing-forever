@@ -34,9 +34,9 @@ this automatically.
       vision/       templates, regions, masked matcher, acquire/track search, calibration, annotate
       audio/        WAV I/O, log-mel features, fingerprints, bite detector, loopback devices
       capture/      window lookup and capture: X11 (ctypes XGetImage), Hyprland (IPC + grim),
-                    Windows (user32 + mss), stub
+                    Windows (user32 + mss), macOS (CoreGraphics window list + mss), stub
       input/        key presses: XTest (python-xlib) or a Wayland virtual keyboard on Linux,
-                    SendInput on Windows, stub elsewhere
+                    SendInput on Windows, Quartz events on macOS, stub elsewhere
       engine/       the fishing loop: states, events, FishingEngine (injectable collaborators), thread
       gui/          Tk-free Presenter (engine thread + setup workers), ttkbootstrap window and pages
     scripts/        release preflight, clip conversion (ffmpeg, dev only)

@@ -59,7 +59,7 @@ class FishPage:
         tabs.add(self.log, text="Logs")
 
     def _start(self) -> None:
-        reasons = self.p.prerequisites()
+        reasons = self.p.prerequisites(request=True)
         if reasons:
             self.blockers.configure(text="; ".join(reasons))
             return

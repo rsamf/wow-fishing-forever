@@ -16,7 +16,15 @@ import numpy as np
 
 from wowfish.audio import AudioChunk
 from wowfish.audio._threaded import ThreadedSource
-from wowfish.capture import Box, WindowRef, find_window, get_capturer, linux_hyprland, linux_x11
+from wowfish.capture import (
+    Box,
+    WindowRef,
+    find_window,
+    get_capturer,
+    linux_hyprland,
+    linux_x11,
+    macos,
+)
 from wowfish.config import Config
 from wowfish.engine import events as ev
 from wowfish.engine.state import State
@@ -418,11 +426,12 @@ def _thumbnail(frame: np.ndarray, x: int, y: int, size: int) -> tuple[np.ndarray
 
 
 def unsupported_platform() -> str:
-    """Why the bot cannot run here, or "" when it can (Linux X11/Xwayland/Hyprland, or Windows)."""
+    """Why the bot cannot run here, or "" when it can (Linux X11/Xwayland/Hyprland, Windows,
+    macOS)."""
     import os
     import sys
 
-    if sys.platform == "win32" or linux_x11() or linux_hyprland():
+    if sys.platform == "win32" or macos() or linux_x11() or linux_hyprland():
         return ""
     if sys.platform == "linux" and not os.environ.get("DISPLAY"):
         return (
@@ -431,8 +440,30 @@ def unsupported_platform() -> str:
         )
     return (
         "the bot is not supported yet on this platform "
-        "(Linux X11/Xwayland/Hyprland and Windows only)"
+        "(Linux X11/Xwayland/Hyprland, Windows, and macOS only)"
     )
+
+
+def missing_permissions(request: bool = False) -> list[str]:
+    """The macOS privacy permissions the bot still lacks, in plain words; empty elsewhere.
+
+    `request` also asks macOS for them, which shows its prompt the first time.
+    """
+    if not macos():
+        return []
+    from wowfish.capture._quartz import screen_capture_available
+    from wowfish.errors import NotSupported
+    from wowfish.input._quartz import accessibility_available
+
+    missing: list[str] = []
+    for check in (screen_capture_available, accessibility_available):
+        try:
+            ok, detail = check(request)
+        except NotSupported as e:
+            ok, detail = False, str(e)
+        if not ok:
+            missing.append(detail)
+    return missing
 
 
 def build_engine(
@@ -458,6 +489,9 @@ def build_engine(
     platform_problem = unsupported_platform()
     if platform_problem:
         raise RuntimeError(platform_problem)
+    missing = missing_permissions(request=True)
+    if missing:
+        raise RuntimeError("; ".join(missing))
     window = find_window(title)
     if window is None:
         raise RuntimeError(f"no window titled {title!r}; is the game running?")

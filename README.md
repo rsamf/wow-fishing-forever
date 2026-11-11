@@ -76,9 +76,29 @@ Clone and run in place:
     uv sync --group dev
     uv run wowfish doctor
 
-### Additional step for Mac users
+### Additional steps for Mac users
 
-Mac users need to install a virtual loopback device such as [BlackHole](https://existential.audio/blackhole/), route the game's audio through it, and pick it on the Setup tab (this sets `audio.capture = "device"`).
+macOS cannot record one app's sound, and it keeps the screen and the keyboard behind privacy
+permissions, so a Mac needs a few one-time steps:
+
+1. **Audio.** Install [BlackHole 2ch](https://existential.audio/blackhole/). In *Audio MIDI
+   Setup*, click **+** > *Create Multi-Output Device*, tick your speakers (or headphones) and
+   BlackHole 2ch, and choose that device in *System Settings > Sound > Output*, so you still
+   hear the game. Then pick **BlackHole 2ch** on wowfish's Setup tab and click *Use this and
+   listen* (this sets `audio.capture = "device"`).
+2. **Permissions.** macOS grants them to the app wowfish runs in: Terminal (double-clicking
+   `wowfish-gui` opens it in Terminal too), or iTerm and the like. In *System Settings > Privacy
+   & Security*, switch that app on under:
+   - *Screen & System Audio Recording*, to see the game window. Quit and reopen the app after.
+   - *Accessibility*, to press keys in the game.
+   - *Microphone*, to listen to BlackHole. macOS asks the first time the bot listens.
+
+   Start shows macOS's prompts for the first two, and `wowfish doctor` says which are missing.
+   macOS 15 also asks whether Terminal may "bypass the system private window picker" when the
+   bot first looks at the game, and again about once a month; click *Allow*.
+
+macOS support is new: it has been tested on macOS 15 in a virtual machine with a stand-in game
+window, not yet in WoW on a real Mac. Please open an issue if it misbehaves.
 
 ## Go Fish
 
