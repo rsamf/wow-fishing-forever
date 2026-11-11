@@ -346,14 +346,21 @@ def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
 
 
 class _Pond:
-    """A game in which every cast lands a bobber that bites at once and Interact clears it.
-    Fills in for the clock, capturer, keyboard, matcher, audio, and detector; time moves only
-    when the engine sleeps."""
+    """A game in which every cast lands a bobber that bites `bite_after_s` later and Interact
+    clears it. The quit key "0" closes the window 20 s after a press, once `ignored_quits`
+    presses have gone unanswered. Fills in for the clock, window lookup, capturer, keyboard,
+    matcher, audio, and detector; time moves when the engine sleeps, and 10 ms per audio read
+    (one pass of the loop)."""
 
-    def __init__(self) -> None:
+    def __init__(self, bite_after_s: float = 0.0, ignored_quits: int = 0) -> None:
         self.t = 0.0
         self.sample_rate = RATE
         self.bobber = False
+        self.cast_at = 0.0
+        self.bite_after_s = bite_after_s
+        self.ignored_quits = ignored_quits
+        self.closes_at = float("inf")
+        self.window = WindowRef("World of Warcraft", None, 0, 0, 10, 10)
         self.focused = True
         self.pressed: list[tuple[float, str, float]] = []  # time, key, hold
         self.bites: list[float] = []
@@ -381,11 +388,20 @@ class _Pond:
         self.pressed.append((self.t, key, hold_s))
         if key in ("1", "f"):
             self.bobber = key == "1"
+            self.cast_at = self.t
+        if key == "0":
+            self.ignored_quits -= 1
+            if self.ignored_quits < 0:
+                self.closes_at = min(self.closes_at, self.t + 20)
+
+    def find(self, title: str) -> WindowRef | None:
+        return None if self.t >= self.closes_at else self.window
 
     def is_game_focused(self, window) -> bool:
         return self.focused
 
     def read(self, n: int) -> np.ndarray:
+        self.t += 0.01
         return np.zeros(n, np.float32)
 
     def clear(self) -> int:
@@ -393,7 +409,7 @@ class _Pond:
         return 0
 
     def feed(self, chunk) -> list[BiteEvent]:
-        if not self.bobber:
+        if not self.bobber or self.t - self.cast_at < self.bite_after_s:
             return []
         self.bites.append(self.t)
         return [BiteEvent("fishingbobber_1", 0.9, 0.0)]
@@ -403,17 +419,19 @@ class _Pond:
 
 
 def _fish(
-    behavior: BehaviorConfig, minutes: float, game: GameConfig | None = None, focused: bool = True
+    behavior: BehaviorConfig,
+    minutes: float,
+    game: GameConfig | None = None,
+    pond: _Pond | None = None,
 ) -> tuple[_Pond, list[str]]:
     """Fish for `minutes`, or until the session limit in `game` stops the engine."""
-    pond = _Pond()
-    pond.focused = focused
+    pond = pond or _Pond()
     cfg = Config(game=game or GameConfig(), vision=VisionConfig(), audio=AudioConfig(),
                  behavior=behavior)  # fmt: skip
     engine = FishingEngine(
-        cfg, WindowRef("World of Warcraft", None, 0, 0, 10, 10),
+        cfg, pond.window,
         capturer=pond, input_device=pond, audio_source=pond, detector=pond, matcher=pond,
-        clock=pond.clock, sleep=pond.sleep, rng=random.Random(7),
+        find_window=pond.find, clock=pond.clock, sleep=pond.sleep, rng=random.Random(7),
     )  # fmt: skip
     while pond.t < minutes * 60 and engine.state is not State.STOPPED:
         engine.step()
@@ -464,17 +482,30 @@ def test_fishing_loop_varies_its_rhythm_only_when_asked():
 
 
 def test_session_limit_quits_the_game_only_when_asked():
-    """When the time limit runs out with a quit key set, that key is the last press, pressed
-    once. Without a quit key, or with the game not focused, the bot only stops."""
+    """When the time limit runs out mid-cast with a quit key set, that cast still ends in
+    Interact; only then is the key pressed, and the bot stops once the game window is gone. A
+    press the game ignores is repeated, 3 presses at most. Without a quit key, or with the game
+    not focused, the bot only stops."""
     game = GameConfig(session_minutes=1, quit_key="0")
-    pond, lines = _fish(BehaviorConfig(), 5, game)
+    pond, lines = _fish(BehaviorConfig(), 5, game, _Pond(bite_after_s=15))
     keys = [k for _, k, _ in pond.pressed]
-    assert keys.count("0") == 1 and keys[-1] == "0" and pond.pressed[-1][0] >= 60
+    (last_cast, *_), (interact, *_), (quit_at, *_) = pond.pressed[-3:]
+    assert keys[-3:] == ["1", "f", "0"] and keys.count("0") == 1
+    assert last_cast < 60 < interact <= quit_at
+    assert "The game closed. Stopping." in lines and lines[-1] == "Stopped (session limit)"
+
+    pond, lines = _fish(BehaviorConfig(), 5, game, _Pond(ignored_quits=1))
+    assert [k for _, k, _ in pond.pressed].count("0") == 2
     assert lines[-1] == "Stopped (session limit)"
+    pond, lines = _fish(BehaviorConfig(), 5, game, _Pond(ignored_quits=9))
+    assert [k for _, k, _ in pond.pressed].count("0") == 3
+    assert any("the game is still open" in line for line in lines)
 
     pond, _ = _fish(BehaviorConfig(), 5, GameConfig(session_minutes=1))
     assert "0" not in {k for _, k, _ in pond.pressed}
 
-    pond, lines = _fish(BehaviorConfig(), 5, game, focused=False)
+    pond = _Pond()
+    pond.focused = False
+    pond, lines = _fish(BehaviorConfig(), 5, game, pond)
     assert pond.pressed == []
     assert any("left it running" in line for line in lines)

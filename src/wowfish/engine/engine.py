@@ -43,6 +43,9 @@ SCORES_EVERY_S = 0.1  # ...and send each clip's peak score this often, for the G
 SLEEP_SLICE_S = 0.1
 RESWEEP_AFTER_TIMEOUTS = 2  # icon timeouts in a row before the next cast measures the icon again
 JUMP_LANDING_S = (1.0, 1.5)  # Fishing cannot be cast mid-air; wait this long after a jump
+QUIT_WAIT_S = 30.0  # away from an inn, /quit counts down 20 s before the game closes
+QUIT_TRIES = 3  # quit key presses before giving up on closing the game
+BUSY = (State.CASTING, State.WAIT_BITE, State.INTERACT)  # a cast in hand
 
 
 class FishingEngine:
@@ -141,9 +144,11 @@ class FishingEngine:
         if self._stop:
             self._finish("user")
             return
-        if self.session_s != 0 and now - self.started >= self.session_s:
+        if self._time_up() and not (self.cfg.game.quit_key and self.state in BUSY):
+            # with a quit key, the cast in hand finishes first (no new one starts): the quit
+            # comes between casts, not mid-cast or while looting
             self._quit_game()
-            self._finish("session limit")
+            self._finish("user" if self._stop else "session limit")
             return
         try:
             self._step(now)
@@ -344,21 +349,58 @@ class FishingEngine:
         self._misses += 1
         return False
 
+    def _time_up(self) -> bool:
+        return self.session_s != 0 and self._elapsed() >= self.session_s
+
     def _quit_game(self) -> None:
-        """Press the key of the player's /quit macro, if one is set, so the game logs out and
-        closes when the session runs out."""
-        key = self.cfg.game.quit_key
+        """Press the key of the player's /quit macro, if one is set, and wait for the game
+        window to close; press it again while the window stays, QUIT_TRIES times in all."""
+        key, find = self.cfg.game.quit_key, self._find_window
         if not key:
             return
         try:
-            if self.input.is_game_focused(self.window) is False:
-                self._emit(
-                    ev.Error(self._t(), "time is up, but the game is not focused; left it running")
+            for _ in range(QUIT_TRIES):
+                if self.input.is_game_focused(self.window) is False:
+                    self._emit(
+                        ev.Error(
+                            self._t(), "time is up, but the game is not focused; left it running"
+                        )
+                    )
+                    return
+                self._press(key, "quit")
+                if find is None:
+                    return  # nothing to watch the window with
+                self._change(
+                    State.IDLE,
+                    f"Time is up; pressed {key} to quit the game",
+                    f"Waiting up to {QUIT_WAIT_S:g} s for the game to close",
                 )
-                return
-            self._press(key, "quit")
+                if self._wait_for_game_to_close(find):
+                    self._change(State.IDLE, "The game closed", "Stopping")
+                    return
+                if self._stop:
+                    return
+            self._emit(
+                ev.Error(
+                    self._t(),
+                    f"pressed {key} {QUIT_TRIES} times, but the game is still open; "
+                    "is the /quit macro on that key?",
+                )
+            )
         except Exception as e:
             self._emit(ev.Error(self._t(), f"could not quit the game: {type(e).__name__}: {e}"))
+
+    def _wait_for_game_to_close(self, find: Callable[..., WindowRef | None]) -> bool:
+        """Look for the game window every second for up to QUIT_WAIT_S; True once it is gone."""
+        deadline = self._clock() + QUIT_WAIT_S
+        while not self._stop:
+            found = find("World of Warcraft")
+            if found is None or (found.handle, found.pid) != (self.window.handle, self.window.pid):
+                return True  # nothing left, or only another window with the title
+            if self._clock() >= deadline:
+                return False
+            self._wait(1.0)
+        return False
 
     def _press(self, key: str, why: str) -> None:
         self.input.press_key(key, self.behavior.hold_s())
@@ -376,7 +418,9 @@ class FishingEngine:
         rest = self.behavior.break_s(self._clock())
         if rest > 0 and self.session_s != 0:  # a break never outlasts the session
             rest = min(rest, max(0.0, self.session_s - self._elapsed()))
-        if rest > 0:
+        if self._time_up():
+            nxt = "Time is up; quitting the game" if self.cfg.game.quit_key else "Time is up"
+        elif rest > 0:
             nxt = f"Taking a {rest / 60:.1f} min break, then casting again"
         else:
             nxt = f"Casting again in {pause:.1f} s"
