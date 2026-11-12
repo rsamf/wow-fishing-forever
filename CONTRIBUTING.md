@@ -27,7 +27,7 @@ this automatically.
     src/wowfish/
       cli.py        typer app; registers the commands below
       commands/     calibrate, watch, listen, verify-bite, run, gui (one module each)
-      config.py     TOML config: [game], [vision], [audio], [run]; defaults, validation, save
+      config.py     TOML config: defaults, validation, save; adds new settings to old files at launch
       paths.py      config / cache / log locations (WOWFISH_HOME override)
       doctor.py     environment probes
       assets/       interact-icon sprites (PNG) and splash clips (WAV) shipped in the package

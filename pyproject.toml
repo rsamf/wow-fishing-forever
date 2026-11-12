@@ -18,6 +18,7 @@ dependencies = [
   "mss>=10.2.0",
   "python-xlib>=0.33 ; sys_platform == 'linux'",
   "ttkbootstrap>=2,<3",
+  "tomlkit>=0.15,<1",
 ]
 
 [project.optional-dependencies]

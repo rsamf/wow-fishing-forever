@@ -1,8 +1,9 @@
-"""Eleven checks that protect what the bot actually relies on: the shipped assets, the default
-config, logging in the console-less GUI executable, that the two detectors say yes to the real
-thing and no to nothing, that the game window is picked correctly from the compositor's
-replies and from macOS's window list, that macOS listens to BlackHole, and that the fishing
-loop varies its rhythm, or quits the game when time is up, only when the config asks it to.
+"""Twelve checks that protect what the bot actually relies on: the shipped assets, the default
+config, that an older config gains the settings added since without losing anything, logging in
+the console-less GUI executable, that the two detectors say yes to the real thing and no to
+nothing, that the game window is picked correctly from the compositor's replies and from
+macOS's window list, that macOS listens to BlackHole, and that the fishing loop varies its
+rhythm, or quits the game when time is up, only when the config asks it to.
 
 Everything here runs on bundled files and synthetic signals. No screen, audio device, window
 system, or Tk is touched, so a failure means the code or the assets changed, not the machine.
@@ -13,15 +14,18 @@ from __future__ import annotations
 import random
 import subprocess
 import sys
+import tomllib
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import tomlkit
 from loguru import logger
+from typer.testing import CliRunner
 
 from wowfish import capture
-from wowfish.assets import CLIP_NAMES, ICON_SIZES
+from wowfish.assets import CLIP_NAMES, ICON_SIZES, default_config_path
 from wowfish.audio import AudioChunk, devices
 from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
@@ -29,7 +33,7 @@ from wowfish.audio.features import DEFAULT_MEL
 from wowfish.capture import WindowRef, _quartz, _wayland, _x11
 from wowfish.capture._quartz import frontmost_pid, pick_quartz_window
 from wowfish.capture._wayland import pick_hyprland_window
-from wowfish.cli import _setup_logging
+from wowfish.cli import _setup_logging, app
 from wowfish.config import (
     AudioConfig,
     BehaviorConfig,
@@ -81,6 +85,60 @@ def test_default_config_matches_code_defaults(tmp_path):
 
     save_config(from_file, path)
     assert load_config(path) == (from_file, [])
+
+
+def test_older_config_gains_new_settings_at_launch(tmp_path, monkeypatch):
+    """A config from an older release gets every setting added since, with its comment from
+    default_config, the next time wowfish starts. The user's values, comments and unknown keys
+    stay, a second start leaves the file alone, a file that does not parse is left for
+    load_config to report, no file is created where there was none, and nothing is written if
+    the merge would change a value already there."""
+    monkeypatch.setenv("WOWFISH_HOME", str(tmp_path))
+    path = tmp_path / "config" / "config.toml"
+    path.parent.mkdir()
+
+    def launch() -> str:
+        try:
+            result = CliRunner().invoke(app, ["config", "--path"])
+        finally:
+            logger.remove()  # closes the log file so tmp_path can be deleted on Windows
+        assert result.exit_code == 0, result.output
+        return path.read_text() if path.exists() else ""
+
+    assert launch() == ""  # no config yet: launching does not create one
+
+    old = (
+        "# my own note\n"
+        "[vision]\n"
+        "icon_size_px = 53\n"
+        "legacy_key = 1\n"
+        "\n"
+        "[game]\n"
+        "# Keybind for the Fishing ability on your action bar.\n"
+        'cast_key = "7"'  # no newline at the end
+    )
+    path.write_text(old)
+    merged = launch()
+
+    expected = tomllib.loads(default_config_path().read_text())
+    expected["game"]["cast_key"] = "7"
+    expected["vision"].update(icon_size_px=53, legacy_key=1)
+    assert tomllib.loads(merged) == expected
+    for line in old.splitlines():
+        assert line in merged.splitlines(), line
+    assert "# Keybind of an action bar macro containing /quit." in merged
+    assert "# Variations so the bot does not keep the exact same rhythm." in merged
+    assert load_config(path)[1] == ["unknown key vision.legacy_key ignored"]
+
+    assert launch() == merged  # nothing new to add: the file is not touched
+
+    broken = "[game\ncast_key = 1\n"
+    path.write_text(broken)
+    assert launch() == broken
+
+    path.write_text(old)  # if the merge ever changed a value already there, nothing is written
+    monkeypatch.setattr(tomlkit, "dumps", lambda doc: 'cast_key = "7"\n')
+    assert launch() == old
 
 
 def test_logging_works_without_stderr(tmp_path, monkeypatch):

@@ -9,13 +9,11 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 from loguru import logger
 
-from wowfish import paths
 from wowfish.audio import AudioChunk, AudioUnavailable
 from wowfish.config import Config, load_config, save_config
 from wowfish.engine import events as ev
@@ -88,7 +86,6 @@ class CalibrateDone:
 @dataclass(frozen=True)
 class VerifyDone:
     report: Any  # audio.verify.BiteReport
-    recording: Path
 
 
 @dataclass(frozen=True)
@@ -421,14 +418,14 @@ class Presenter:
                 self.last_calibration = item
                 ok = "ok" if cal.valid else "no gold icon found; cast first and try again"
                 return f"Calibration: {cal.icon_size_px} px, score {cal.score:.2f} ({ok})"
-            case VerifyDone(report=r, recording=path):
+            case VerifyDone(report=r):
                 if r.stands_out:
                     lo = min(b.score for b in r.bites)
                     hi = max(b.score for b in r.bites)
                     return (
                         f"Bite check: {len(r.bites)} bite(s) scoring {lo:.2f}-{hi:.2f}, "
                         f"everything else at most {r.floor:.2f}; suggested threshold "
-                        f"{r.threshold:.2f} ({path.name})"
+                        f"{r.threshold:.2f}"
                     )
                 return (
                     f"Bite check: no bite stood out (everything at most {r.floor:.2f}); try again"
@@ -493,7 +490,6 @@ class Presenter:
         from wowfish.audio.clips import build_fingerprints
         from wowfish.audio.features import DEFAULT_MEL
         from wowfish.audio.verify import bite_report, score_recording
-        from wowfish.audio.wav import write_wav
 
         result: object
         try:
@@ -520,14 +516,10 @@ class Presenter:
             self._record_level = None
             self.verify_status = "Recorded; looking for the splash..."
             y = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
-            folder = paths.config_file().parent / "recordings"
-            folder.mkdir(parents=True, exist_ok=True)
-            path = folder / time.strftime("bite-%Y%m%d-%H%M%S.wav")
-            write_wav(path, y, source.sample_rate)
             fps = build_fingerprints()
             scores = score_recording(y, source.sample_rate, fps, DEFAULT_MEL)
             report = bite_report(scores, fps, DEFAULT_MEL)
-            result = VerifyDone(report, path)
+            result = VerifyDone(report)
         except Exception as e:
             result = WorkerFailed("verify the bite", str(e))
         finally:

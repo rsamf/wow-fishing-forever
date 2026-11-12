@@ -53,6 +53,25 @@ def _root(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
 ) -> None:
     _setup_logging(verbose=verbose)
+    _add_missing_settings()
+
+
+def _add_missing_settings() -> None:
+    """Give a config from an older release the settings added since. Best effort: a failure
+    here must not stop wowfish from starting on the config as it is."""
+    from loguru import logger
+
+    from wowfish import paths
+    from wowfish.config import add_missing_settings
+
+    path = paths.config_file()
+    try:
+        added = add_missing_settings(path)
+    except Exception as e:
+        logger.warning(f"could not add new settings to {path}: {e}")
+        return
+    if added:
+        logger.info(f"added new settings to {path}: {', '.join(added)}")
 
 
 def main() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import tomllib
 from dataclasses import asdict, dataclass, field, fields
@@ -9,6 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import tomli_w
+import tomlkit
+import tomlkit.exceptions
+from tomlkit.items import Comment, Key, Table, Whitespace
 
 from wowfish import paths
 from wowfish.assets import default_config_path
@@ -106,6 +110,83 @@ def ensure_config_file(path: Path | None = None) -> bool:
         return False
     path.write_text(default_config_path().read_text(encoding="utf-8"), encoding="utf-8")
     return True
+
+
+def add_missing_settings(path: Path | None = None) -> list[str]:
+    """Add the settings a newer release introduced to an existing config file, each with its
+    comment from default_config, and return what was added ("game.quit_key", "[behavior]").
+
+    Only adds: values, comments and unknown keys already in the file stay as they are. Does not
+    create a missing file, and leaves alone a file that does not parse (load_config reports it).
+    """
+    path = path or paths.config_file()
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8")
+    if text and not text.endswith("\n"):
+        text += "\n"  # or the first added comment would land on the last line
+    try:
+        doc = tomlkit.parse(text)
+        before = tomllib.loads(text)
+    except (tomlkit.exceptions.ParseError, tomllib.TOMLDecodeError):
+        return []
+    template = tomlkit.parse(default_config_path().read_text(encoding="utf-8"))
+
+    added: list[str] = []
+    for section, template_table in template.items():
+        if section not in doc:
+            doc.append(section, template_table)
+            added.append(f"[{section}]")
+            continue
+        table = doc[section]
+        if not isinstance(table, Table):  # e.g. an inline table; load_config judges it
+            continue
+        missing = [
+            (key, comments)
+            for key, comments in _keys_with_comments(template_table)
+            if key.key not in table
+        ]
+        if not missing:
+            continue
+        body = table.value.body
+        blank_line_after = bool(body) and isinstance(body[-1][1], Whitespace)
+        for key, comments in missing:
+            for comment in comments:
+                table.append(None, comment)
+            table.append(key, template_table[key.key])
+            added.append(f"{section}.{key.key}")
+        if blank_line_after:  # appending lands after the section's blank line; put one back
+            table.append(None, tomlkit.ws("\n"))
+
+    if not added:
+        return []
+    merged = tomlkit.dumps(doc)
+    after = tomllib.loads(merged)
+    for section, values in before.items():  # never change what was there
+        kept = after.get(section)
+        if isinstance(values, dict) and isinstance(kept, dict):
+            kept = {k: v for k, v in kept.items() if k in values}
+        if kept != values:
+            return []
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(merged, encoding="utf-8")
+    os.replace(tmp, path)
+    return added
+
+
+def _keys_with_comments(table: Table) -> list[tuple[Key, list[Comment]]]:
+    """Each key of a default_config table with the comment lines directly above it."""
+    found: list[tuple[Key, list[Comment]]] = []
+    comments: list[Comment] = []
+    for key, item in table.value.body:
+        if isinstance(item, Comment):
+            comments.append(item)
+        elif key is not None:
+            found.append((key, comments))
+            comments = []
+        else:
+            comments = []
+    return found
 
 
 def load_config(path: Path | None = None) -> tuple[Config, list[str]]:
