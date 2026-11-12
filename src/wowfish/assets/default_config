@@ -11,6 +11,12 @@ session_minutes = 0
 # finishes the cast in hand, then presses it until the game window closes (3 tries at most).
 # Empty = leave the game running.
 quit_key = ""
+# Keybind for a lure macro, e.g. "/use Shiny Bauble" then "/use 16" (puts it on the main-hand
+# fishing pole). The bot presses it before the first cast and again every lure_minutes. If the
+# lure is not in your bags, the macro does nothing. Empty = no lure.
+lure_key = ""
+# How long the lure's buff lasts, in minutes.
+lure_minutes = 10.0
 
 [vision]
 # On-screen size of the interact icon in pixels. 0 = not calibrated; `wowfish calibrate` sets it.
@@ -44,6 +50,8 @@ pause_min_s = 0.5
 pause_max_s = 2.0
 # How long each key is held down, in milliseconds.
 key_hold_ms = 60
+# Seconds to wait after pressing lure_key for the lure to finish applying before casting.
+lure_cast_s = 6.0
 
 [behavior]
 # Variations so the bot does not keep the exact same rhythm. All of them are off by default.

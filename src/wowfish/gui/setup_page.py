@@ -26,6 +26,10 @@ CHECKLIST = (
     "Then press Start on the Fish tab. The first cast of every run measures the gear icon, so\n"
     "the bite check and the calibration below are optional: use them when fishing misbehaves."
 )
+LURE_HINT = (
+    "Optional. A macro like /use Shiny Bauble + /use 16 that puts a lure on the pole; it is "
+    "pressed before the first cast and again whenever the lure runs out. Empty = no lure."
+)
 VERIFY_HINT = "Click, then fish by hand in the game until a fish bites (it records for 60 s)."
 CALIBRATE_HINT = (
     f"Click, then cast in the game: it watches for the gold gear for up to {CALIBRATE_WATCH_S:g} s."
@@ -60,6 +64,13 @@ class SetupPage:
         )
         self.keys_note = tb.Label(keys_row, text="")
         self.keys_note.grid(row=0, column=7, sticky="w")
+        tb.Label(keys_row, text="Lure key").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.lure = tb.Entry(keys_row, width=8)
+        self.lure.insert(0, presenter.cfg.game.lure_key)
+        self.lure.grid(row=1, column=1, padx=6, pady=(6, 0))
+        tb.Label(keys_row, text=LURE_HINT, wraplength=420, justify="left").grid(
+            row=1, column=2, columnspan=6, sticky="w", pady=(6, 0)
+        )
 
         limit = tb.Labelframe(f, text="Time limit", padding=8)
         limit.pack(fill="x", pady=4)
@@ -145,7 +156,7 @@ class SetupPage:
 
     def _save_keys(self) -> None:
         try:
-            self.p.save_keys(self.cast.get(), self.interact.get(), self.quit.get())
+            self.p.save_keys(self.cast.get(), self.interact.get(), self.quit.get(), self.lure.get())
             self.keys_note.configure(text="saved")
         except ValueError as e:
             self.keys_note.configure(text=str(e))
