@@ -4,6 +4,8 @@ engine thread and the setup workers (meter, calibration grab, bite recording). N
 from __future__ import annotations
 
 import queue
+import secrets
+import string
 import sys
 import threading
 import time
@@ -25,6 +27,13 @@ from wowfish.input import keys
 GAME_TITLE = "World of Warcraft"
 BLOCK = 1024
 CALIBRATE_WATCH_S = 30.0  # how long the calibration keeps grabbing frames for the gear icon
+_ALNUM = string.ascii_letters + string.digits
+
+
+def _rand_thread_name(length: int = 12) -> str:
+    first = secrets.choice(string.ascii_letters)
+    rest = "".join(secrets.choice(_ALNUM) for _ in range(length - 1))
+    return first + rest
 
 
 def describe(event: ev.Event) -> str:
@@ -131,7 +140,7 @@ class _Meter:
         self.level_dbfs = -120.0
         self.scores: dict[str, float] = {}
         self._stop = threading.Event()
-        self.thread = threading.Thread(target=self._run, name="wowfish-meter", daemon=True)
+        self.thread = threading.Thread(target=self._run, name=_rand_thread_name(), daemon=True)
 
     def start(self) -> None:
         self.thread.start()
@@ -293,7 +302,7 @@ class Presenter:
         reasons += missing_permissions(request)
         if sys.platform == "darwin" and self.cfg.audio.capture == self._game:
             reasons.append(MAC_NO_GAME_AUDIO)
-        window = self._find_window("World of Warcraft")
+        window = self._find_window(GAME_TITLE)
         if window is None and not problem:
             reasons.append("World of Warcraft window not found; is the game running?")
         size = self.cfg.vision.icon_size_px
@@ -438,7 +447,7 @@ class Presenter:
 
     def grab_and_calibrate(self) -> None:
         threading.Thread(
-            target=self._calibrate_worker, name="wowfish-calibrate", daemon=True
+            target=self._calibrate_worker, name=_rand_thread_name(), daemon=True
         ).start()
 
     def _calibrate_worker(self) -> None:
@@ -448,7 +457,7 @@ class Presenter:
         result: object
         try:
             self.calibrate_status = "Finding the game window..."
-            window = self._find_window("World of Warcraft")
+            window = self._find_window(GAME_TITLE)
             if window is None:
                 raise RuntimeError("World of Warcraft window not found; is the game running?")
             cap = self._get_capturer(window)
@@ -483,7 +492,7 @@ class Presenter:
 
     def record_and_verify(self, seconds: float = 60.0, selector: str | None = None) -> None:
         threading.Thread(
-            target=self._verify_worker, args=(seconds, selector), name="wowfish-verify", daemon=True
+            target=self._verify_worker, args=(seconds, selector), name=_rand_thread_name(), daemon=True
         ).start()
 
     def _verify_worker(self, seconds: float, selector: str | None) -> None:
