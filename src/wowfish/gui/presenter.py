@@ -55,6 +55,8 @@ def describe(event: ev.Event) -> str:
             return f"Pressed {key} to jump"
         case ev.KeyPressed(key=key, why="quit"):
             return f"Pressed {key} to quit the game"
+        case ev.KeyPressed(key=key, why="lure"):
+            return f"Pressed {key} to put the lure on"
         case ev.KeyPressed(key=key):
             return f"Pressed {key} to interact"
         case ev.Caught():
@@ -209,14 +211,14 @@ class Presenter:
     def reload(self) -> None:
         self.cfg = load_config()[0]
 
-    def save_keys(self, cast_key: str, interact_key: str, quit_key: str = "") -> None:
+    def save_keys(self, cast_key: str, interact_key: str, quit_key: str = "", lure_key: str = "") -> None:
         cast, interact = keys.normalize_key(cast_key), keys.normalize_key(interact_key)
-        quit_ = keys.normalize_key(quit_key)
-        for name in (cast, interact, *([quit_] if quit_ else [])):
+        quit_, lure = keys.normalize_key(quit_key), keys.normalize_key(lure_key)  # "" = none
+        for name in (cast, interact, *(k for k in (quit_, lure) if k)):
             if not keys.is_supported_key(name):
                 raise ValueError(f"unsupported key {name!r}: use a letter, digit, F1-F12, or space")
         self.reload()  # a run may have saved its icon measurement since; keep it
-        game = replace(self.cfg.game, cast_key=cast, interact_key=interact, quit_key=quit_)
+        game = replace(self.cfg.game, cast_key=cast, interact_key=interact, quit_key=quit_, lure_key=lure)
         save_config(replace(self.cfg, game=game))
         self.reload()
 
