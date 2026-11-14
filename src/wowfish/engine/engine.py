@@ -115,7 +115,8 @@ class FishingEngine:
         self._last_listen = 0.0
         self._last_scores_sent = 0.0
         self._best_heard: tuple[str, float] = ("", -1.0)  # best clip score since the icon was found
-
+        self._lure_at: float | None = None  # when the lure last finished applying
+        
     # -- public ------------------------------------------------------------------------------
 
     def stop(self) -> None:
@@ -191,6 +192,9 @@ class FishingEngine:
         self._maybe_stats(now)
 
     def _cast(self, now: float) -> None:
+        if self._lure_due(now):
+            self._apply_lure()
+            return  # still IDLE: the next step casts
         if self._find_window is not None:
             found = self._find_window("World of Warcraft")
             if found is not None and (found.width, found.height) != (
@@ -326,6 +330,26 @@ class FishingEngine:
             self._emit(ev.Timeout(self._t(), "loot", self.cfg.run.loot_timeout_s))
             self._miss("The bobber did not go away after Interact")
 
+     # -- lure --------------------------------------------------------------------------------
+
+    def _lure_due(self, now: float) -> bool:
+        if not self.cfg.game.lure_key:
+            return False
+        return self._lure_at is None or now - self._lure_at >= self.cfg.game.lure_minutes * 60.0
+
+    def _apply_lure(self) -> None:
+        """Press the lure macro and wait out its cast. The bot cannot see the bags or the buff,
+        so the macro does nothing when the lure is missing and this just refreshes on a timer."""
+        key, wait = self.cfg.game.lure_key, self.cfg.run.lure_cast_s
+        self._press(key, "lure")
+        self._change(
+            State.IDLE,
+            f"Pressed {key} to put the lure on the pole",
+            f"Casting in {wait:g} s; the lure is renewed every {self.cfg.game.lure_minutes:g} min",
+        )
+        self._wait(wait)
+        self._lure_at = self._clock()
+        
     # -- helpers -----------------------------------------------------------------------------
 
     def _track(self, now: float) -> bool | None:
