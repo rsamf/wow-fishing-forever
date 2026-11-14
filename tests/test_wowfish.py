@@ -1,10 +1,4 @@
-"""Twelve checks that protect what the bot actually relies on: the shipped assets, the default
-config, that an older config gains the settings added since without losing anything, logging in
-the console-less GUI executable, that the two detectors say yes to the real thing and no to
-nothing, that the game window is picked correctly from the compositor's replies and from
-macOS's window list, that macOS listens to BlackHole, and that the fishing loop varies its
-rhythm, or quits the game when time is up, only when the config asks it to.
-
+"""
 Everything here runs on bundled files and synthetic signals. No screen, audio device, window
 system, or Tk is touched, so a failure means the code or the assets changed, not the machine.
 """
