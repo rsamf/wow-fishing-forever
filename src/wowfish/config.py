@@ -39,7 +39,10 @@ class GameConfig:
     interact_key: str = "f"
     session_minutes: int = 0
     quit_key: str = ""  # an action bar /quit macro, pressed when session_minutes runs out
-
+# Keybind for a macro that puts a lure (e.g. a bauble) on the fishing pole. "" = no lure.
+    lure_key: str = ""
+    # How long the lure lasts; it is put on again once this has passed.
+    lure_minutes: float = 10.0
 
 @dataclass(frozen=True)
 class VisionConfig:
@@ -70,7 +73,7 @@ class RunConfig:
     pause_min_s: float = 0.5
     pause_max_s: float = 2.0
     key_hold_ms: int = 60
-
+    lure_cast_s: float = 6.0
 
 @dataclass(frozen=True)
 class BehaviorConfig:
@@ -254,6 +257,9 @@ def _validate(path: Path, cfg: Config) -> None:
     q = cfg.game.quit_key
     check(not q or is_supported_key(q), "game.quit_key", "must be empty or a supported key name")
     v, a = cfg.vision, cfg.audio
+    lk = cfg.game.lure_key
+    check(not lk or is_supported_key(lk), "game.lure_key", "must be empty or a supported key name")
+    check(cfg.game.lure_minutes > 0, "game.lure_minutes", "must be positive")
     check(0.0 < v.icon_threshold <= 1.0, "vision.icon_threshold", "must be in (0, 1]")
     check(v.match_width >= 320, "vision.match_width", "must be at least 320")
     check(v.icon_size_px >= 0, "vision.icon_size_px", "must be 0 or positive")
@@ -267,6 +273,7 @@ def _validate(path: Path, cfg: Config) -> None:
     check(r.loot_timeout_s > 0, "run.loot_timeout_s", "must be positive")
     check(r.pause_min_s >= 0, "run.pause_min_s", "must be 0 or positive")
     check(r.pause_min_s <= r.pause_max_s, "run.pause_min_s", "must not exceed run.pause_max_s")
+    check(r.lure_cast_s >= 0, "run.lure_cast_s", "must be 0 or positive")
     check(10 <= r.key_hold_ms <= 500, "run.key_hold_ms", "must be between 10 and 500")
     b = cfg.behavior
     for lo, hi in (
