@@ -1,11 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for the two wowfish single-file executables: `wowfish` (console) and
-`wowfish-gui` (windowed, opens the GUI).
+"""PyInstaller spec for the two single-file executables (console and windowed).
 
 Build with: uv run pyinstaller --clean --noconfirm packaging/wowfish.spec
 """
 
+import os
+import secrets
+import string
+
 from PyInstaller.utils.hooks import collect_data_files, copy_metadata
+
+
+def _rand_name(length: int = 10) -> str:
+    alphabet = string.ascii_letters + string.digits
+    return secrets.choice(string.ascii_letters) + "".join(
+        secrets.choice(alphabet) for _ in range(length - 1)
+    )
+
+
+CLI_NAME = os.environ.get("BUILD_CLI_NAME") or _rand_name(10)
+GUI_NAME = os.environ.get("BUILD_GUI_NAME") or _rand_name(10)
 
 datas, binaries, hiddenimports = [], [], []
 # importlib.metadata.version("wowfish") needs the dist-info inside the bundle.
@@ -36,7 +50,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="wowfish",
+    name=CLI_NAME,
     debug=False,
     strip=False,
     upx=False,
@@ -61,7 +75,7 @@ gui_exe = EXE(
     g.binaries,
     g.datas,
     [],
-    name="wowfish-gui",
+    name=GUI_NAME,
     debug=False,
     strip=False,
     upx=False,
