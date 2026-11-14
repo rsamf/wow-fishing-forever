@@ -114,7 +114,15 @@ In the game:
 4. Type `/console SoftTargetIconGameObject 1` once. This shows the gold gear icon over your
    bobber whenever it is close enough to interact with.
 5. *Options > Sound*: set **Ambience** and **Music** to 0 and keep **Sound Effects** up.
+6. Optional, a lure: make a macro and put it on an action bar key, then set that key as the
+   **Lure key** on the Setup tab (or `lure_key` in the config):
 
+       /use Shiny Bauble
+       /use 16
+
+   `/use 16` puts the lure on the fishing pole in your main hand. The bot presses the key before
+   its first cast and again every `lure_minutes` (default 10), when the buff runs out. If the lure
+   is not in your bags, the macro does nothing and fishing carries on.
 
 **Note to Linux users**: On GNOME, the first synthetic key press opens a "Remote Desktop" dialog. Switch on *Allow Remote Interaction* and click *Share*. Until you do, key presses are silently dropped.
 

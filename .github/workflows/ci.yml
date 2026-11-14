@@ -41,33 +41,41 @@ jobs:
       - name: Unit tests
         run: uv run pytest -v
 
+      - name: Generate random build names
+        shell: bash
+        run: |
+          CLI_NAME=$(python3 -c 'import secrets, string; a=string.ascii_letters+string.digits; print(secrets.choice(string.ascii_letters)+"".join(secrets.choice(a) for _ in range(9)))')
+          GUI_NAME=$(python3 -c 'import secrets, string; a=string.ascii_letters+string.digits; print(secrets.choice(string.ascii_letters)+"".join(secrets.choice(a) for _ in range(9)))')
+          echo "BUILD_CLI_NAME=$CLI_NAME" >> "$GITHUB_ENV"
+          echo "BUILD_GUI_NAME=$GUI_NAME" >> "$GITHUB_ENV"
+
       - name: Build executable
         run: uv run pyinstaller --clean --noconfirm packaging/wowfish.spec
 
       - name: Smoke executable (POSIX)
         if: runner.os != 'Windows'
         run: |
-          ./dist/wowfish --version
-          ./dist/wowfish doctor
-          ./dist/wowfish listen --list
-          ./dist/wowfish-gui --version
+          ./dist/$BUILD_CLI_NAME --version
+          ./dist/$BUILD_CLI_NAME doctor
+          ./dist/$BUILD_CLI_NAME listen --list
+          ./dist/$BUILD_GUI_NAME --version
 
       - name: Smoke GUI window (Linux)
         if: runner.os == 'Linux'
         # `--version` never loads Tk. Open the real window on a virtual display: it must still be
         # running when timeout stops it (exit 124); a missing module exits sooner with 1.
-        run: timeout 15 xvfb-run -a ./dist/wowfish-gui || test $? -eq 124
+        run: timeout 15 xvfb-run -a ./dist/$BUILD_GUI_NAME || test $? -eq 124
 
       - name: Smoke executable (Windows)
-        # wowfish-gui.exe is a windowed app: PowerShell only waits for it (and sets
+        # GUI executable is a windowed app: PowerShell only waits for it (and sets
         # $LASTEXITCODE) when its output is piped.
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          .\dist\wowfish.exe --version; if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          .\dist\wowfish.exe doctor;    if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          .\dist\wowfish.exe listen --list; if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          .\dist\wowfish-gui.exe --version | Out-Host; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\dist\$env:BUILD_CLI_NAME.exe --version; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\dist\$env:BUILD_CLI_NAME.exe doctor;    if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\dist\$env:BUILD_CLI_NAME.exe listen --list; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\dist\$env:BUILD_GUI_NAME.exe --version | Out-Host; if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Smoke GUI window (Windows)
         # Open the real window: unlike `--version` it runs logging setup with no console. A crash
@@ -76,16 +84,16 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Start-Process .\dist\wowfish-gui.exe
+          Start-Process .\dist\$env:BUILD_GUI_NAME.exe
           $title = ''
-          for ($i = 0; $i -lt 30 -and $title -notlike 'wowfish *'; $i++) {
+          for ($i = 0; $i -lt 30 -and $title -notmatch '^[a-zA-Z][a-zA-Z0-9]{11}$'; $i++) {
             Start-Sleep 1
-            $title = (Get-Process wowfish-gui -ErrorAction SilentlyContinue |
+            $title = (Get-Process $env:BUILD_GUI_NAME -ErrorAction SilentlyContinue |
               Where-Object MainWindowTitle | Select-Object -First 1).MainWindowTitle
           }
-          Get-Process wowfish-gui -ErrorAction SilentlyContinue | Stop-Process -Force
-          if ($title -notlike 'wowfish *') {
-            Write-Error "wowfish-gui.exe never opened its window (last window title: '$title')"
+          Get-Process $env:BUILD_GUI_NAME -ErrorAction SilentlyContinue | Stop-Process -Force
+          if ($title -notmatch '^[a-zA-Z][a-zA-Z0-9]{11}$') {
+            Write-Error "$env:BUILD_GUI_NAME.exe never opened its window (last window title: '$title')"
             exit 1
           }
 
@@ -93,6 +101,8 @@ jobs:
         if: matrix.python == '3.12'
         uses: actions/upload-artifact@v7
         with:
-          name: wowfish-${{ matrix.os }}
-          path: dist/wowfish*
+          name: build-${{ matrix.os }}-${{ env.BUILD_GUI_NAME }}
+          path: |
+            dist/${{ env.BUILD_CLI_NAME }}*
+            dist/${{ env.BUILD_GUI_NAME }}*
           if-no-files-found: error
