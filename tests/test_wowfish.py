@@ -5,6 +5,7 @@ system, or Tk is touched, so a failure means the code or the assets changed, not
 
 from __future__ import annotations
 
+import itertools
 import random
 import subprocess
 import sys
@@ -561,3 +562,21 @@ def test_session_limit_quits_the_game_only_when_asked():
     pond, lines = _fish(BehaviorConfig(), 5, game, pond)
     assert pond.pressed == []
     assert any("left it running" in line for line in lines)
+
+
+def test_lure_is_put_on_first_and_renewed_when_it_runs_out():
+    """With a lure key set, the bot presses it before the very first cast, waits out its cast
+    time, and presses it again once lure_minutes have passed, never sooner and never more than
+    one cast cycle later. Without a lure key it never presses one."""
+    game = GameConfig(lure_key="3", lure_minutes=1.0)
+    pond, lines = _fish(BehaviorConfig(), 200 / 60, game)
+    lures = [t for t, key, _ in pond.pressed if key == "3"]
+    (first_t, first_key, _), (cast_t, cast_key, _) = pond.pressed[:2]
+    assert (first_key, cast_key) == ("3", "1") and first_t < 1  # lure first, then cast
+    assert cast_t - first_t >= RunConfig().lure_cast_s - 1e-6  # ...after its cast time
+    assert len(lures) >= 3
+    for before, after in itertools.pairwise(lures):
+        assert 60.0 <= after - before <= 60.0 + RunConfig().lure_cast_s + 10.0, lures
+    assert "Pressed 3 to put the lure on" in lines
+    pond, _ = _fish(BehaviorConfig(), 200 / 60)
+    assert "3" not in {k for _, k, _ in pond.pressed}
