@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+JOIN_S = 2.0
+
 
 class ThreadedSource:
     def __init__(self, inner: Any, *, block: int = 1024, max_s: float = 4.0) -> None:
@@ -26,6 +28,9 @@ class ThreadedSource:
         self._frames = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._closing = threading.Lock()  # guards the two flags below
+        self._reader_done = False
+        self._reader_closes = False  # __exit__ gave up waiting; the reader closes the source
         self.error: BaseException | None = None
         self._thread = threading.Thread(target=self._run, name="wowfish-audio", daemon=True)
 
@@ -36,7 +41,11 @@ class ThreadedSource:
 
     def __exit__(self, *exc: object) -> None:
         self._stop.set()
-        self._thread.join(2.0)
+        self._thread.join(JOIN_S)
+        with self._closing:
+            if not self._reader_done:
+                self._reader_closes = True
+                return
         self.inner.__exit__(*exc)
 
     def _run(self) -> None:
@@ -54,6 +63,12 @@ class ThreadedSource:
                     break
         except BaseException as e:  # surface on the next read instead of dying silently
             self.error = e
+        finally:
+            with self._closing:
+                self._reader_done = True
+                close = self._reader_closes
+            if close:
+                self.inner.__exit__(None, None, None)
 
     def clear(self) -> int:
         """Drop everything buffered so far; return how many frames were dropped."""
