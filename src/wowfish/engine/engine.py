@@ -43,6 +43,7 @@ TICK_S = 0.02  # rest between passes of the loop, so it does not spin a CPU core
 RESWEEP_AFTER_TIMEOUTS = 2  # icon timeouts in a row before the next cast measures the icon again
 JUMP_LANDING_S = (1.0, 1.5)  # Fishing cannot be cast mid-air; wait this long after a jump
 QUIT_WAIT_S = 30.0  # away from an inn, /quit counts down 20 s before the game closes
+MEASURE_AFTER_S = 1.5  # the bobber needs this long to land; no icon is measured sooner
 FOCUS_WAIT_S = 1.0  # how long a focus request gets before it counts as turned down
 QUIT_TRIES = 3  # quit key presses before giving up on closing the game
 BUSY = (State.CASTING, State.WAIT_BITE, State.INTERACT)  # a cast in hand
@@ -107,6 +108,7 @@ class FishingEngine:
         self.started: float | None = None
         self._stop = False
         self._asked_focus = False
+        self._before_cast: np.ndarray | None = None  # the game just before the cast key
         self._resume_state = State.IDLE
         self._borrowed = False  # the bot took focus from another window and owes it back
         self._focus_token: object | None = None  # ...and this is what had it
@@ -280,6 +282,10 @@ class FishingEngine:
         clear = getattr(self.audio, "clear", None)
         if clear is not None:  # a pause, break, or jump left audio queued; hear this cast live
             clear()
+        # What is on screen now is not the bobber: a measurement that matches here too is a
+        # gold button in the UI, not the gear.
+        measuring = self._sweeping or self.search is None
+        self._before_cast = self.capturer.grab() if measuring else None
         self._press(key, "cast")
         self._return_focus()  # the trip is over: the next key press is at the next splash
         self.stats = ev.Stats(
@@ -305,9 +311,10 @@ class FishingEngine:
                 self._sweeping = False
                 self._found(frame, m)
                 return
-        if self._sweeping or self.search is None:
+        landed = now - self._t_cast >= MEASURE_AFTER_S
+        if landed and (self._sweeping or self.search is None):
             cal = self._calibrate(frame, match_width=self.cfg.vision.match_width)
-            if cal.valid:
+            if cal.valid and not self._was_there_before_cast(cal):
                 self._use_calibration(cal)
                 self._icon_timeouts = 0
                 self._found(frame, IconMatch(cal.score, cal.x, cal.y, cal.icon_size_px, cal.gold))
@@ -318,6 +325,17 @@ class FishingEngine:
             if self._icon_timeouts >= RESWEEP_AFTER_TIMEOUTS:
                 self._sweeping = True
             self._miss("No gear icon over the bobber")
+
+    def _was_there_before_cast(self, cal: Any) -> bool:
+        """Whether the measured icon already showed, same size and place, before the cast."""
+        before = self._before_cast
+        if before is None:
+            return False
+        h, w = before.shape[:2]
+        region = Region.around(cal.x, cal.y, w, h, 0.10)
+        m = self._matcher_factory(cal.icon_size_px).match(before, region)
+        near = max(abs(m.x - cal.x), abs(m.y - cal.y)) <= cal.icon_size_px
+        return bool(near and m.accepted(cal.suggested_threshold()))
 
     def _use_calibration(self, cal: Any) -> None:
         self.matcher = self._matcher_factory(cal.icon_size_px)

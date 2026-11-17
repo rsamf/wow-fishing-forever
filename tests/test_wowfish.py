@@ -66,6 +66,7 @@ from wowfish.input import _quartz as input_quartz
 from wowfish.input import get_input_device
 from wowfish.input._wayland import keycodes_from_keymap
 from wowfish.input.keys import MAC_KEYCODES, SUPPORTED_KEYS
+from wowfish.vision.calibrate import Calibration
 from wowfish.vision.matcher import IconMatch, IconMatcher
 from wowfish.vision.template import load_icon_templates, template_for_size
 
@@ -577,6 +578,7 @@ class _Pond:
         self.window = WindowRef("World of Warcraft", None, 0, 0, 10, 10, handle=1)
         self.moves: list[tuple[float, WindowRef | None]] = []  # (from when, what refresh finds)
         self.opened: list[WindowRef] = []
+        self.decoy = False  # a gold icon in the UI that is on screen all the time
         self.front = "game"  # which window has keyboard focus
         self.refuse_focus = False  # the system turns focus requests down
         self.focus_log: list[object] = []  # every focus change the bot made, in order
@@ -597,11 +599,11 @@ class _Pond:
     def close(self) -> None:
         pass
 
-    def grab(self, box=None) -> np.ndarray:
-        return np.zeros((10, 10, 3), np.uint8)
+    def grab(self, box=None) -> np.ndarray:  # all ones while the bobber (or a decoy) shows
+        return np.full((10, 10, 3), 1 if self.bobber or self.decoy else 0, np.uint8)
 
     def match(self, frame, region=None, full_width=None) -> IconMatch:
-        return IconMatch(0.9 if self.bobber else 0.0, 5, 5, 4, 1.0)
+        return IconMatch(0.9 if frame.any() else 0.0, 5, 5, 4, 1.0)
 
     def press_key(self, key: str, hold_s: float) -> None:
         self.pressed.append((self.t, key, hold_s))
@@ -747,6 +749,43 @@ def test_engine_follows_the_window_it_was_given():
     pond.focused = False
     _, lines = _fish(BehaviorConfig(), 1, pond=pond)
     assert "Paused: Mundo de Warcraft is not the focused window; click into the game" in lines
+
+
+def test_icon_is_measured_only_once_the_bobber_can_be_there():
+    """A run with no saved icon size measures it on the first cast, but not before the bobber
+    has had time to land, and never from something that was already on screen before the cast
+    (a gold button in the UI): that would be saved and matched on every cast after."""
+    asked: list[float] = []
+
+    def measure(pond: _Pond):
+        def calibrate(frame, *, match_width):
+            asked.append(pond.t - pond.cast_at)
+            found = bool(frame.any())
+            return Calibration(40, 53, 0.84 if found else 0.0, 5, 5, 1.0 if found else 0.0, 0.5)
+
+        return calibrate
+
+    def fish(pond: _Pond) -> list[str]:
+        engine = FishingEngine(
+            Config(game=GameConfig(), vision=VisionConfig(), audio=AudioConfig()), pond.window,
+            capturer=pond, input_device=pond, audio_source=pond, detector=pond,
+            matcher_factory=lambda size: pond, calibrate=measure(pond),
+            clock=pond.clock, sleep=pond.sleep, rng=random.Random(7),
+        )  # fmt: skip
+        while pond.t < 30 and engine.state is not State.STOPPED:
+            engine.step()
+        return [describe(e) for e in engine.events.queue]
+
+    lines = fish(_Pond(bite_after_s=5))
+    assert asked and min(asked) >= 1.5
+    assert "Measured the gear icon at 40 px (score 0.84)" in lines
+
+    asked.clear()
+    pond = _Pond(bite_after_s=5)
+    pond.decoy = True
+    lines = fish(pond)
+    assert not any(line.startswith("Measured") for line in lines)
+    assert any(line.startswith("No gear icon") for line in lines)
 
 
 def test_background_fishing_borrows_focus_and_gives_it_back():
