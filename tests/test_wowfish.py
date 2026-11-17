@@ -16,7 +16,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import tomlkit
+import typer
 from loguru import logger
 from typer.testing import CliRunner
 
@@ -34,8 +36,9 @@ from wowfish.capture._quartz import (
     refreshed_from_infos,
 )
 from wowfish.capture._wayland import hyprland_windows, pick_hyprland_window, refresh_hyprland
-from wowfish.capture.choices import order_choices
+from wowfish.capture.choices import WindowChoice, order_choices
 from wowfish.cli import _setup_logging, app
+from wowfish.commands._common import pick_window_or_fail
 from wowfish.config import (
     AudioConfig,
     BehaviorConfig,
@@ -284,6 +287,36 @@ def test_window_picker_lists_every_window_guess_first(monkeypatch):
     assert [c.window for c in order_choices([term], game, lambda w: "")] == [game, term]
     unguessed = order_choices([term, tab], None, lambda w: "")
     assert [(c.window, c.guess) for c in unguessed] == [(tab, False), (term, False)]
+
+
+def test_terminal_picker_reads_a_window_number(capsys):
+    """`run`, `listen` and `watch --live` list the windows by number, the guess first and
+    marked; Enter takes #1, a number picks, anything else asks again; no windows or the end of
+    input stops with an error instead of picking one itself."""
+    a = WindowChoice(WindowRef("魔兽世界", 7, 0, 0, 2560, 1440, handle=1), "Wow.exe", True)
+    b = WindowChoice(WindowRef("x" * 300, None, 0, 0, 800, 600, handle=2), "", False)
+
+    def answers(*replies):
+        it = iter(replies)
+
+        def ask(prompt):
+            reply = next(it, None)
+            if reply is None:
+                raise EOFError
+            return reply
+
+        return ask
+
+    assert pick_window_or_fail([a, b], ask=answers("")) == a.window
+    err = capsys.readouterr().err
+    assert "1) 魔兽世界 — Wow.exe — 2560x1440  (looks like the game)" in err
+    assert f"2) {'x' * 69}… — ? — 800x600" in err
+    assert pick_window_or_fail([a, b], ask=answers("0", "-1", "1.5", "x", " 2 ")) == b.window
+    assert capsys.readouterr().err.count("type a number from 1 to 2") == 4
+    for choices, ask in (([a, b], answers()), ([], answers("1"))):
+        with pytest.raises(typer.Exit) as e:
+            pick_window_or_fail(choices, ask=ask)
+        assert e.value.exit_code == 1
 
 
 def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):

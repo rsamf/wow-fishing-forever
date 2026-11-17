@@ -10,7 +10,12 @@ from typing import Annotated
 import numpy as np
 import typer
 
-from wowfish.commands._common import fail, load_config_or_fail
+from wowfish.commands._common import (
+    fail,
+    load_config_or_fail,
+    pick_window_or_fail,
+    preflight_or_fail,
+)
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp"}
 
@@ -31,25 +36,12 @@ def _file_frames(source: Path, fps: float) -> Iterator[tuple[float, np.ndarray, 
         yield i / fps, frame, 0.0
 
 
-def _live_frames(
-    title: str, fps: float, seconds: float
-) -> Iterator[tuple[float, np.ndarray, float]]:
+def _live_frames(fps: float, seconds: float) -> Iterator[tuple[float, np.ndarray, float]]:
     from wowfish import capture
 
-    window = capture.find_window(title)
-    if window is not None:
-        cap = capture.get_capturer(window)
-    elif capture.linux_x11() or capture.linux_hyprland():
-        fail(f"no window titled {title!r}; is the game running?")
-    else:
-        from wowfish.capture import _mss
-
-        try:
-            window = _mss.primary_monitor_window()
-            cap = _mss.MssCapturer()
-        except Exception as e:
-            fail(f"no window titled {title!r} and no screen capture available ({e})")
-        typer.echo(f"window {title!r} not found; capturing the primary monitor", err=True)
+    preflight_or_fail()
+    window = pick_window_or_fail()
+    cap = capture.get_capturer(window)
     try:
         cap.open(window)
     except Exception as e:
@@ -85,7 +77,6 @@ def watch(
     save_frames: Annotated[
         Path | None, typer.Option("--save-frames", help="Write annotated thumbnails here.")
     ] = None,
-    title: str = typer.Option("World of Warcraft", "--title", help="Window title to capture."),
 ) -> None:
     """Print phase, score, and position for every frame; shows what the bot would see."""
     import cv2
@@ -101,7 +92,7 @@ def watch(
     cfg = load_config_or_fail()
     templates = load_icon_templates()
     threshold = cfg.vision.icon_threshold
-    frames = _live_frames(title, fps, seconds) if live else _file_frames(source, fps)
+    frames = _live_frames(fps, seconds) if live else _file_frames(source, fps)
     if save_frames:
         save_frames.mkdir(parents=True, exist_ok=True)
     search: IconSearch | None = None

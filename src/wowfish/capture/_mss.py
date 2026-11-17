@@ -16,12 +16,6 @@ def _mss_instance() -> Any:
     return factory()
 
 
-def primary_monitor_window() -> WindowRef:
-    with _mss_instance() as sct:
-        mon = sct.monitors[1]
-    return WindowRef("primary monitor", None, mon["left"], mon["top"], mon["width"], mon["height"])
-
-
 class MssCapturer:
     def __init__(self) -> None:
         self._sct: Any = None
