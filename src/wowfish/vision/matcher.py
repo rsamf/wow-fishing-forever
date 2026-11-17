@@ -11,6 +11,7 @@ from wowfish.vision.region import FULL, Region
 from wowfish.vision.template import IconTemplate, resize_template
 
 NO_MATCH = -1.0
+ICON_THRESHOLD = 0.75  # the score to accept the icon at until a run has measured its own
 GOLD_MIN = 0.12  # masked mean of (R - B) / 255; the gold sprite is ~0.3, the grey one ~0
 # Smallest template side, in match-space pixels, that still looks like a gear. Below this the
 # sprite is a warm blob and scores ~0.85 on skin, hair, and wood (seen live: 19 px at 5K -> 7 px).

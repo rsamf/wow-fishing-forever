@@ -140,7 +140,7 @@ class Presenter:
         for name in (cast, interact, *(k for k in (quit_, lure) if k)):
             if not keys.is_supported_key(name):
                 raise ValueError(f"unsupported key {name!r}: use a letter, digit, F1-F12, or space")
-        self.reload()  # a run may have saved its icon measurement since; keep it
+        self.reload()  # pick up what is in the file now
         game = replace(
             self.cfg.game, cast_key=cast, interact_key=interact, quit_key=quit_, lure_key=lure
         )
@@ -150,14 +150,14 @@ class Presenter:
     def save_session_minutes(self, minutes: int) -> None:
         if minutes < 0:
             raise ValueError("the time limit must be 0 (forever) or more minutes")
-        self.reload()  # a run may have saved its icon measurement since; keep it
+        self.reload()  # pick up what is in the file now
         if minutes != self.cfg.game.session_minutes:  # saving rewrites the file; skip if unchanged
             save_config(replace(self.cfg, game=replace(self.cfg.game, session_minutes=minutes)))
             self.reload()
 
     def save_background(self, on: bool) -> None:
         """Whether the bot fishes while another window has focus; used from the next Start."""
-        self.reload()  # a run may have saved its icon measurement since; keep it
+        self.reload()  # pick up what is in the file now
         if on != self.cfg.run.background:
             save_config(replace(self.cfg, run=replace(self.cfg.run, background=on)))
             self.reload()
@@ -191,7 +191,7 @@ class Presenter:
             raise ValueError(f"{value.strip() or 'empty'} is not a number") from None
         if not 0.0 < threshold <= 1.0:
             raise ValueError("must be more than 0 and at most 1")
-        self.reload()  # a running bot may have saved its icon measurement since this was loaded
+        self.reload()  # pick up what is in the file now
         save_config(replace(self.cfg, audio=replace(self.cfg.audio, bite_threshold=threshold)))
         self.reload()
         return threshold

@@ -7,7 +7,6 @@ import queue
 import random
 import time
 from collections.abc import Callable
-from dataclasses import replace
 from typing import Any
 
 import cv2
@@ -28,7 +27,7 @@ from wowfish.config import Config
 from wowfish.engine import events as ev
 from wowfish.engine.behavior import Behavior
 from wowfish.engine.state import State
-from wowfish.vision.matcher import IconMatch
+from wowfish.vision.matcher import ICON_THRESHOLD, IconMatch
 from wowfish.vision.region import Region
 from wowfish.vision.search import IconSearch
 
@@ -66,7 +65,6 @@ class FishingEngine:
         matcher: Any = None,
         matcher_factory: Callable[[int], Any] | None = None,
         calibrate: Callable[..., Any] | None = None,
-        on_calibrated: Callable[[Any], None] | None = None,
         refresh_window: Callable[[WindowRef], WindowRef | None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
@@ -83,14 +81,11 @@ class FishingEngine:
         self.detector = detector
         self._matcher_factory = matcher_factory or (lambda size: matcher)
         self._calibrate = calibrate or _real_calibrate
-        self._on_calibrated = on_calibrated or (lambda cal: None)
         self._refresh_window = refresh_window
-        self.threshold = cfg.vision.icon_threshold
-        # The saved size (if any) is only a first guess: every run measures the icon on its
-        # first cast, since resolution and UI scale change the icon's size on screen.
-        self.matcher = matcher if matcher is not None else None
-        if self.matcher is None and cfg.vision.icon_size_px > 0:
-            self.matcher = self._matcher_factory(cfg.vision.icon_size_px)
+        # Nothing about the icon is saved between runs: every run measures it on its first
+        # cast, since resolution and UI scale change the icon's size on screen.
+        self.threshold = ICON_THRESHOLD
+        self.matcher = matcher
         self.search = IconSearch(self.matcher, self.threshold) if self.matcher else None
         self._sweeping = True
         self._icon_timeouts = 0
@@ -343,7 +338,6 @@ class FishingEngine:
         self.search = IconSearch(self.matcher, self.threshold)
         self._sweeping = False
         self._emit(ev.Calibrated(self._t(), int(cal.icon_size_px), float(cal.score)))
-        self._on_calibrated(cal)
 
     def _found(self, frame: np.ndarray, m: Any) -> None:
         self._icon_xy = (m.x, m.y)
@@ -682,7 +676,7 @@ def build_engine(
     from wowfish.audio.detector import detector_for
     from wowfish.audio.devices import open_game_audio
     from wowfish.input import get_input_device
-    from wowfish.vision.matcher import MIN_TEMPLATE_PX, IconMatcher
+    from wowfish.vision.matcher import IconMatcher
     from wowfish.vision.template import load_icon_templates, template_for_size
 
     platform_problem = unsupported_platform()
@@ -700,23 +694,6 @@ def build_engine(
     def matcher_factory(size: int) -> IconMatcher:
         return IconMatcher(template_for_size(templates, size), cfg.vision.match_width)
 
-    size = cfg.vision.icon_size_px
-    if size > 0 and matcher_factory(size).template_px(window.width) < MIN_TEMPLATE_PX:
-        size = 0  # the saved size is useless for this window; the first cast measures it
-    cfg = replace(cfg, vision=replace(cfg.vision, icon_size_px=size))
-
-    def on_calibrated(cal: Any) -> None:
-        from wowfish.config import load_config, save_config
-
-        current, _ = load_config()
-        vision = replace(
-            current.vision,
-            icon_size_px=cal.icon_size_px,
-            icon_native_size=cal.native_size,
-            icon_threshold=cal.suggested_threshold(),
-        )
-        save_config(replace(current, vision=vision))
-
     detector = detector_for(cfg.audio)
     audio: Any = ThreadedSource(open_game_audio(window, cfg.audio.device))
     return FishingEngine(
@@ -727,7 +704,6 @@ def build_engine(
         audio_source=audio,
         detector=detector,
         matcher_factory=matcher_factory,
-        on_calibrated=on_calibrated,
         refresh_window=refresh_window,
         session_s=session_s,
     )

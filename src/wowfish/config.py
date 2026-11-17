@@ -22,7 +22,12 @@ _LINE_RE = re.compile(r"\(at line (\d+), column \d+\)")
 
 
 # Settings from older releases: still accepted in a config file, and ignored without a warning.
-RETIRED_KEYS = {("audio", "capture")}
+RETIRED_KEYS = {
+    ("audio", "capture"),
+    ("vision", "icon_size_px"),
+    ("vision", "icon_native_size"),
+    ("vision", "icon_threshold"),
+}
 
 
 class ConfigError(Exception):
@@ -51,9 +56,6 @@ class GameConfig:
 
 @dataclass(frozen=True)
 class VisionConfig:
-    icon_size_px: int = 0
-    icon_native_size: int = 0
-    icon_threshold: float = 0.75
     match_width: int = 1920
 
 
@@ -263,10 +265,7 @@ def _validate(path: Path, cfg: Config) -> None:
     check(not lk or is_supported_key(lk), "game.lure_key", "must be empty or a supported key name")
     check(cfg.game.lure_minutes > 0, "game.lure_minutes", "must be positive")
     v, a = cfg.vision, cfg.audio
-    check(0.0 < v.icon_threshold <= 1.0, "vision.icon_threshold", "must be in (0, 1]")
     check(v.match_width >= 320, "vision.match_width", "must be at least 320")
-    check(v.icon_size_px >= 0, "vision.icon_size_px", "must be 0 or positive")
-    check(v.icon_native_size >= 0, "vision.icon_native_size", "must be 0 or positive")
     check(0.0 < a.bite_threshold <= 1.0, "audio.bite_threshold", "must be in (0, 1]")
     check(a.refractory_s >= 0.0, "audio.refractory_s", "must be 0 or positive")
     r = cfg.run

@@ -67,7 +67,7 @@ from wowfish.input import get_input_device
 from wowfish.input._wayland import keycodes_from_keymap
 from wowfish.input.keys import MAC_KEYCODES, SUPPORTED_KEYS
 from wowfish.vision.calibrate import Calibration
-from wowfish.vision.matcher import IconMatch, IconMatcher
+from wowfish.vision.matcher import ICON_THRESHOLD, IconMatch, IconMatcher
 from wowfish.vision.template import load_icon_templates, template_for_size
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -225,7 +225,7 @@ def test_bite_detector_stays_quiet_on_silence_and_noise():
 def test_icon_matcher_finds_sprite_and_rejects_water():
     """Every sprite pasted onto noisy blue water is found at the right spot, at 1080p and on a
     4K-wide frame that the matcher downscales. The same water without a sprite is rejected."""
-    threshold = VisionConfig().icon_threshold
+    threshold = ICON_THRESHOLD
     templates = load_icon_templates()
     rng = np.random.default_rng(0)
     for frame_w, frame_h in ((1920, 1080), (3840, 2160)):
