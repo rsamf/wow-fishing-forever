@@ -8,6 +8,7 @@ from typing import Any
 from wowfish.gui import image
 from wowfish.gui.presenter import Presenter, View
 from wowfish.gui.score_graph import ScoreGraph
+from wowfish.gui.window_picker import pick_window
 
 
 class FishPage:
@@ -64,11 +65,17 @@ class FishPage:
             self.blockers.configure(text="; ".join(reasons))
             return
         self.blockers.configure(text="")
-        from wowfish.capture import GAME_TITLE, find_window
+        pick_window(self.frame, self._start_with)
 
-        window = find_window(GAME_TITLE)  # until the picker dialog replaces this guess
-        if window is not None:
-            self.p.start(window)
+    def _start_with(self, window: Any) -> None:
+        if window is None:
+            self.blockers.configure(text="No window picked")
+            return
+        problems = self.p.window_problems(window)
+        if problems:
+            self.blockers.configure(text="; ".join(problems))
+            return
+        self.p.start(window)
 
     def render(self, view: View) -> None:
         self.state.configure(text=view.state)

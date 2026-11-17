@@ -21,7 +21,6 @@ from wowfish.engine.thread import EngineThread
 from wowfish.gui import image
 from wowfish.input import keys
 
-GAME_TITLE = "World of Warcraft"
 BLOCK = 1024
 CALIBRATE_WATCH_S = 30.0  # how long the calibration keeps grabbing frames for the gear icon
 CALIBRATE_REST_S = 0.1  # between those grabs, so the watch does not spin a CPU core
@@ -162,12 +161,10 @@ class Presenter:
         build_engine: Callable[..., Any] | None = None,
         list_devices: Callable[[], list[Any]] | None = None,
         open_game_audio: Callable[..., Any] | None = None,
-        find_window: Callable[..., Any] | None = None,
         get_capturer: Callable[..., Any] | None = None,
     ) -> None:
         from wowfish.audio.devices import audio_follows_window, list_loopback_devices
         from wowfish.audio.devices import open_game_audio as real_open
-        from wowfish.capture import find_window as real_find
         from wowfish.capture import get_capturer as real_capturer
         from wowfish.engine.engine import build_engine as real_build
 
@@ -175,7 +172,6 @@ class Presenter:
         self._list_devices = list_devices or list_loopback_devices
         self._open_game_audio = open_game_audio or real_open
         self.audio_follows_window: bool = audio_follows_window()
-        self._find_window = find_window or real_find
         self._get_capturer = get_capturer or real_capturer
 
         self.cfg: Config = load_config()[0]
@@ -274,35 +270,39 @@ class Presenter:
         self.reload()
         return threshold
 
-    def prerequisites(self, request: bool = False) -> list[str]:
-        """What blocks Start, in plain words; empty when the bot can run.
+    def preflight(self, request: bool = False) -> list[str]:
+        """What rules out even looking at windows: the platform, or a missing macOS permission.
 
-        `request` also asks macOS for missing permissions, which shows its prompt: Start passes
-        it, the check when the window opens does not.
+        `request` also asks macOS for missing permissions, which shows its prompt.
         """
-        from wowfish.audio.devices import mac_device_name
         from wowfish.engine.engine import missing_permissions, unsupported_platform
-        from wowfish.vision.matcher import MIN_TEMPLATE_PX
 
-        reasons: list[str] = []
         problem = unsupported_platform()
-        if problem:
-            reasons.append(problem)
-        reasons += missing_permissions(request)
+        return ([problem] if problem else []) + missing_permissions(request)
+
+    def prerequisites(self, request: bool = False) -> list[str]:
+        """What blocks Start before a window is picked, in plain words; empty when the bot can
+        run. Start passes `request`; the check when the window opens does not."""
+        from wowfish.audio.devices import mac_device_name
+
+        reasons = self.preflight(request)
         if not self.audio_follows_window:
             try:
                 mac_device_name(self.cfg.audio.device)
             except AudioUnavailable as e:
                 reasons.append(str(e))
-        window = self._find_window("World of Warcraft")
-        if window is None and not problem:
-            reasons.append("World of Warcraft window not found; is the game running?")
+        return reasons
+
+    def window_problems(self, window: Any) -> list[str]:
+        """What blocks Start in the window the user picked."""
+        from wowfish.vision.matcher import MIN_TEMPLATE_PX
+
         size = self.cfg.vision.icon_size_px
-        if size > 0 and window is not None:
+        if size > 0:
             px = round(size * min(1.0, self.cfg.vision.match_width / window.width))
             if px < MIN_TEMPLATE_PX:
-                reasons.append("the calibrated icon is too small for this window; recalibrate")
-        return reasons
+                return ["the calibrated icon is too small for this window; recalibrate"]
+        return []
 
     # -- the bot ----------------------------------------------------------------------------
 
@@ -430,21 +430,18 @@ class Presenter:
 
     # -- setup workers ----------------------------------------------------------------------
 
-    def grab_and_calibrate(self) -> None:
+    def grab_and_calibrate(self, window: Any) -> None:
+        """Watch the window the user picked for the gear icon and measure it."""
         threading.Thread(
-            target=self._calibrate_worker, name="wowfish-calibrate", daemon=True
+            target=self._calibrate_worker, args=(window,), name="wowfish-calibrate", daemon=True
         ).start()
 
-    def _calibrate_worker(self) -> None:
+    def _calibrate_worker(self, window: Any) -> None:
         from wowfish.vision.calibrate import calibrate_icon_scale
         from wowfish.vision.template import load_icon_templates
 
         result: object
         try:
-            self.calibrate_status = "Finding the game window..."
-            window = self._find_window("World of Warcraft")
-            if window is None:
-                raise RuntimeError("World of Warcraft window not found; is the game running?")
             cap = self._get_capturer(window)
             cap.open(window)
             templates = load_icon_templates()
@@ -453,7 +450,7 @@ class Presenter:
                 while True:  # until a frame shows the gear, so there is time to go and cast
                     left = max(0.0, deadline - time.monotonic())
                     self.calibrate_status = (
-                        f"Watching the game for the gold gear icon ({left:.0f} s left). "
+                        f"Watching {window.title} for the gold gear icon ({left:.0f} s left). "
                         "Cast now and keep the game on screen."
                     )
                     frame = cap.grab()

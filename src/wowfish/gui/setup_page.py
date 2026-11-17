@@ -13,6 +13,7 @@ from wowfish.gui.presenter import (
     View,
     WorkerFailed,
 )
+from wowfish.gui.window_picker import pick_window
 
 CHECKLIST = (
     "In the game, before starting:\n"
@@ -196,33 +197,40 @@ class SetupPage:
             self._meter_error = ""
             self.p.start_meter(device=sel)
 
-    def _guess_window(self) -> Any:
-        from wowfish.capture import GAME_TITLE, find_window
-
-        return find_window(GAME_TITLE)  # until the picker dialog replaces this guess
+    def _blocked(self) -> str:
+        """Why no window can be picked right now (platform, macOS permission); "" when one can."""
+        return "; ".join(self.p.preflight(request=True))
 
     def _listen(self) -> None:
-        window = self._guess_window()
-        if window is None:
-            self._meter_error = "no window to listen to"
-            return
-        self._listen_to(window)
+        self._meter_error = self._blocked()
+        if not self._meter_error:
+            pick_window(self.frame, self._listen_to)
 
     def _listen_to(self, window: Any) -> None:
+        if window is None:
+            self._meter_error = "No window picked"
+            return
         self._heard = window
         self._meter_error = ""
         self.p.start_meter(window=window)
 
     def _verify(self) -> None:
-        window = None
-        if self.p.audio_follows_window:
-            window = self._guess_window()
-            if window is None:
-                self.verify_note.configure(text="no window to listen to")
-                return
-        self._verify_with(window)
+        if not self.p.audio_follows_window:  # macOS: the input device, no window needed
+            self._record(None)
+            return
+        blocked = self._blocked()
+        if blocked:
+            self.verify_note.configure(text=blocked)
+            return
+        pick_window(self.frame, self._verify_with)
 
     def _verify_with(self, window: Any) -> None:
+        if window is None:
+            self.verify_note.configure(text="No window picked; nothing recorded.")
+            return
+        self._record(window)
+
+    def _record(self, window: Any) -> None:
         self._meter_was_on = self.p.meter_running
         self.p.stop_meter()  # the recording shows its own level on the meter
         self.verify_button.configure(state="disabled")
@@ -230,10 +238,23 @@ class SetupPage:
         self.p.record_and_verify(60.0, window=window, device=self._selected_device())
 
     def _calibrate(self) -> None:
+        blocked = self._blocked()
+        if blocked:
+            self.cal_note.configure(text=blocked)
+            return
+        self._save_cal_was = str(self.save_cal.cget("state"))
         self.cal_button.configure(state="disabled")
         self.save_cal.configure(state="disabled")
+        pick_window(self.frame, self._calibrate_with)
+
+    def _calibrate_with(self, window: Any) -> None:
+        if window is None:
+            self.cal_note.configure(text="No window picked; nothing changed.")
+            self.cal_button.configure(state="normal")
+            self.save_cal.configure(state=self._save_cal_was)
+            return
         self.cal_note.configure(text="Starting...")
-        self.p.grab_and_calibrate()
+        self.p.grab_and_calibrate(window)
 
     def _save_bite(self) -> None:
         try:

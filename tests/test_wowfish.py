@@ -492,7 +492,7 @@ def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
     monkeypatch.setattr(_quartz, "screen_capture_available", lambda request: (True, ""))
     monkeypatch.setattr(input_quartz, "accessibility_available", lambda request: (False, "AX off"))
     assert devices.open_loopback("").mic is mics[1]  # empty: the first virtual device
-    p = Presenter(find_window=lambda _: None)
+    p = Presenter()
     assert [d.id for d in p.audio_devices()] == [m.name for m in mics[1:] + mics[:1]]
     assert p.prerequisites()[0] == "AX off"
     assert devices.MAC_NO_GAME_AUDIO not in p.prerequisites()
