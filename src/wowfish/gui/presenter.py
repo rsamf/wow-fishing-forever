@@ -155,6 +155,13 @@ class Presenter:
             save_config(replace(self.cfg, game=replace(self.cfg.game, session_minutes=minutes)))
             self.reload()
 
+    def save_background(self, on: bool) -> None:
+        """Whether the bot fishes while another window has focus; used from the next Start."""
+        self.reload()  # a run may have saved its icon measurement since; keep it
+        if on != self.cfg.run.background:
+            save_config(replace(self.cfg, run=replace(self.cfg.run, background=on)))
+            self.reload()
+
     def audio_devices(self) -> list[Any]:
         """macOS cannot capture one app, so there it is the input devices, BlackHole first
         (default). Elsewhere the bot hears the picked window's app and there is nothing to choose.

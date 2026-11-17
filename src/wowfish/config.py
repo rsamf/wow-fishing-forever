@@ -73,6 +73,7 @@ class RunConfig:
     pause_max_s: float = 2.0
     key_hold_ms: int = 60
     lure_cast_s: float = 6.0
+    background: bool = False  # fish while another window has focus, borrowing it per fish
 
 
 @dataclass(frozen=True)

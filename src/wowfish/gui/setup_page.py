@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from wowfish.capture import linux_hyprland
 from wowfish.gui.presenter import (
     Presenter,
     View,
@@ -25,10 +26,33 @@ LURE_HINT = (
     "pressed before the first cast and again whenever the lure runs out. Empty = no lure."
 )
 
+HELP_WRAP_PX = 420
+
+
+def background_help(hyprland: bool) -> str:
+    """What the "?" beside the background-fishing checkbox says; Hyprland gets its catch."""
+    text = (
+        "With this on you can use other windows while the bot fishes. When it hears the splash "
+        "it brings the game to the front, presses Interact, waits for the loot, casts again, "
+        "and then gives focus back to the window you were in. That takes a few seconds per "
+        "fish; anything you type in that time goes to the game.\n\n"
+        "Turn on Sound in Background in the game's sound options, or the bot cannot hear the "
+        "splash. Keep the game window open (not minimized).\n\n"
+        "With this off, the bot pauses whenever the game is not the focused window."
+    )
+    if hyprland:
+        text += (
+            "\n\nOn Hyprland, a game running as a native Wayland window must also stay "
+            "uncovered on a visible workspace: the bot can only read the screen there. A game "
+            "under Xwayland can be covered."
+        )
+    return text
+
 
 class SetupPage:
     def __init__(self, parent: Any, presenter: Presenter) -> None:
         import ttkbootstrap as tb
+        from ttkbootstrap.widgets import ToolTip
 
         self.p = presenter
         self.frame = tb.Frame(parent, padding=10)
@@ -75,6 +99,22 @@ class SetupPage:
         )
         self.limit_note = tb.Label(limit, text="")
         self.limit_note.pack(side="left")
+
+        background = tb.Labelframe(f, text="Fishing in the background", padding=8)
+        background.pack(fill="x", pady=4)
+        self.background = tb.BooleanVar(value=presenter.cfg.run.background)
+        tb.Checkbutton(
+            background,
+            text="Fish while I use another window (the bot takes focus for a few seconds per fish)",
+            variable=self.background,
+            command=self._save_background,
+        ).pack(side="left")
+        help_icon = tb.Label(background, text="?", bootstyle="inverse-info", padding=(6, 0))
+        help_icon.pack(side="left", padx=8)
+        wrap = round(HELP_WRAP_PX * max(1.0, parent.winfo_fpixels("1i") / 96))  # wider on HiDPI
+        ToolTip(help_icon, text=background_help(linux_hyprland()), wraplength=wrap)
+        self.background_note = tb.Label(background, text="")
+        self.background_note.pack(side="left")
 
         audio = tb.Labelframe(f, text="Audio (what the bot hears)", padding=8)
         audio.pack(fill="x", pady=4)
@@ -146,6 +186,13 @@ class SetupPage:
         if sel is not None:
             self.p.save_audio_device(sel)
             self.device_note.configure(text=f"saved {sel}; used from the next Start")
+
+    def _save_background(self) -> None:
+        on = bool(self.background.get())
+        self.p.save_background(on)
+        self.background_note.configure(
+            text=f"saved {'on' if on else 'off'}; used from the next Start"
+        )
 
     def _save_bite(self) -> None:
         try:

@@ -60,6 +60,7 @@ from wowfish.engine.engine import FishingEngine, unsupported_platform
 from wowfish.engine.state import State
 from wowfish.errors import PermissionMissing
 from wowfish.gui.presenter import Presenter, describe
+from wowfish.gui.setup_page import background_help
 from wowfish.input import _quartz as input_quartz
 from wowfish.input import get_input_device
 from wowfish.input._wayland import keycodes_from_keymap
@@ -719,6 +720,16 @@ def test_engine_follows_the_window_it_was_given():
     pond.focused = False
     _, lines = _fish(BehaviorConfig(), 1, pond=pond)
     assert "Paused: Mundo de Warcraft is not the focused window; click into the game" in lines
+
+
+def test_background_help_tells_hyprland_users_the_catch():
+    """The "?" next to the background-fishing checkbox says what the option does, and only on
+    Hyprland adds that a native Wayland game has to stay uncovered."""
+    plain, hypr = background_help(False), background_help(True)
+    for text in (plain, hypr):
+        assert "gives focus back" in text and "Sound in Background" in text
+    assert "Hyprland" in hypr and "uncovered" in hypr
+    assert "Hyprland" not in plain
 
 
 def test_session_limit_quits_the_game_only_when_asked():
