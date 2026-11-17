@@ -142,7 +142,7 @@ Or run it from terminal:
     wowfish config                      # creates the config file; edit cast_key / interact_key
     wowfish run                         # measures the icon on its first cast; Ctrl-C stops
 
-Every time you press **Start**, **Calibrate** or **Listen**, wowfish shows the windows that are open, each with its icon, title and a snapshot, and asks which one is the game. The one titled "World of Warcraft" comes first, but any window works, so a client in another language or with another title is fine. The bot watches that window, presses keys only while it is focused, and (on Linux and Windows) hears only the app that owns it. Nothing about the choice is saved.
+Every time you press **Start** or **Listen**, or start the bite check, wowfish shows the windows that are open, each with its icon, title and a snapshot, and asks which one is the game. The one titled "World of Warcraft" comes first, but any window works, so a client in another language or with another title is fine. The bot watches that window, presses keys only while it is focused, and (on Linux and Windows) hears only the app that owns it. Nothing about the choice is saved.
 
 In the terminal, `run`, `listen` and `watch --live` print the same list with numbers: press Enter for the first window or type a number. A script can answer for you: `echo 1 | wowfish run`.
 
@@ -158,8 +158,7 @@ To close the game when the time limit runs out, make a macro with `/quit`, put i
 |---|---|
 | `wowfish gui` | The setup and fishing window |
 | `wowfish run [--minutes N] [--record-audio WAV]` | Ask which window is the game, then fish from the terminal until Ctrl-C or the session limit; optionally save everything heard |
-| `wowfish doctor` | Check OS, display, OpenCV, game audio capture, input, calibration, config |
-| `wowfish calibrate SHOT.png [--save]` | Measure the interact icon's on-screen size from a screenshot |
+| `wowfish doctor` | Check OS, display, OpenCV, game audio capture, input, config |
 | `wowfish watch --live` | Ask which window, then show what the matcher sees: phase, score, position, milliseconds per frame |
 | `wowfish watch --from DIR` | Same, over saved frames; `--save-frames` writes annotated thumbnails |
 | `wowfish listen [--record WAV]` | Ask which window, then meter its app's audio and print bites as they are heard. macOS listens to BlackHole instead: `--list` shows the input devices, `--device D` picks one |

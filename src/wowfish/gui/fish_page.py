@@ -71,10 +71,6 @@ class FishPage:
         if window is None:
             self.blockers.configure(text="No window picked")
             return
-        problems = self.p.window_problems(window)
-        if problems:
-            self.blockers.configure(text="; ".join(problems))
-            return
         self.p.start(window)
 
     def render(self, view: View) -> None:

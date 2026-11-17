@@ -1,11 +1,10 @@
 """Turns engine events into the words the console prints and the GUI shows, and owns the
-engine thread and the setup workers (meter, calibration grab, bite recording). No Tk here."""
+engine thread and the setup workers (meter, bite recording). No Tk here."""
 
 from __future__ import annotations
 
 import queue
 import threading
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -22,8 +21,6 @@ from wowfish.gui import image
 from wowfish.input import keys
 
 BLOCK = 1024
-CALIBRATE_WATCH_S = 30.0  # how long the calibration keeps grabbing frames for the gear icon
-CALIBRATE_REST_S = 0.1  # between those grabs, so the watch does not spin a CPU core
 
 
 def describe(event: ev.Event) -> str:
@@ -79,12 +76,6 @@ def describe(event: ev.Event) -> str:
 
 
 @dataclass(frozen=True)
-class CalibrateDone:
-    calibration: Any  # vision.calibrate.Calibration
-    thumbnail_png: bytes
-
-
-@dataclass(frozen=True)
 class VerifyDone:
     report: Any  # audio.verify.BiteReport
 
@@ -122,7 +113,6 @@ class View:
     trace: ScoreTrace = field(default_factory=ScoreTrace)
     listening: bool = False  # the meter or the bite recording is reading audio
     verify_status: str = ""  # what the bite recording is doing; empty when idle
-    calibrate_status: str = ""  # what the calibration is doing; empty when idle
 
 
 class _Meter:
@@ -161,18 +151,15 @@ class Presenter:
         build_engine: Callable[..., Any] | None = None,
         list_devices: Callable[[], list[Any]] | None = None,
         open_game_audio: Callable[..., Any] | None = None,
-        get_capturer: Callable[..., Any] | None = None,
     ) -> None:
         from wowfish.audio.devices import audio_follows_window, list_loopback_devices
         from wowfish.audio.devices import open_game_audio as real_open
-        from wowfish.capture import get_capturer as real_capturer
         from wowfish.engine.engine import build_engine as real_build
 
         self._build_engine = build_engine or real_build
         self._list_devices = list_devices or list_loopback_devices
         self._open_game_audio = open_game_audio or real_open
         self.audio_follows_window: bool = audio_follows_window()
-        self._get_capturer = get_capturer or real_capturer
 
         self.cfg: Config = load_config()[0]
         self._results: queue.Queue[object] = queue.Queue()
@@ -184,11 +171,9 @@ class Presenter:
         self.stats = ev.Stats(0.0).as_line()
         self.thumbnail_png: bytes | None = None
         self._before_pause: tuple[str, str, str] | None = None
-        self.last_calibration: CalibrateDone | None = None
         self.trace = ScoreTrace()
         # Written by the setup workers, read by the GUI tick.
         self.verify_status = ""
-        self.calibrate_status = ""
         self._record_level: float | None = None
 
     # -- config -----------------------------------------------------------------------------
@@ -243,19 +228,6 @@ class Presenter:
         """The picked window's app; on macOS the input device (the saved one when None)."""
         return self._open_game_audio(window, self.cfg.audio.device if device is None else device)
 
-    def save_calibration(self) -> None:
-        if self.last_calibration is None:
-            raise ValueError("calibrate first")
-        cal = self.last_calibration.calibration
-        vision = replace(
-            self.cfg.vision,
-            icon_size_px=cal.icon_size_px,
-            icon_native_size=cal.native_size,
-            icon_threshold=cal.suggested_threshold(),
-        )
-        save_config(replace(self.cfg, vision=vision))
-        self.reload()
-
     def save_bite_threshold(self, value: str) -> float:
         """Check and save the bite threshold typed on the Setup tab; the bot uses it from the
         next Start. Raises ValueError with a plain message when it is not a number in (0, 1]."""
@@ -265,7 +237,7 @@ class Presenter:
             raise ValueError(f"{value.strip() or 'empty'} is not a number") from None
         if not 0.0 < threshold <= 1.0:
             raise ValueError("must be more than 0 and at most 1")
-        self.reload()  # a running bot may have saved a calibration since this was loaded
+        self.reload()  # a running bot may have saved its icon measurement since this was loaded
         save_config(replace(self.cfg, audio=replace(self.cfg.audio, bite_threshold=threshold)))
         self.reload()
         return threshold
@@ -292,17 +264,6 @@ class Presenter:
             except AudioUnavailable as e:
                 reasons.append(str(e))
         return reasons
-
-    def window_problems(self, window: Any) -> list[str]:
-        """What blocks Start in the window the user picked."""
-        from wowfish.vision.matcher import MIN_TEMPLATE_PX
-
-        size = self.cfg.vision.icon_size_px
-        if size > 0:
-            px = round(size * min(1.0, self.cfg.vision.match_width / window.width))
-            if px < MIN_TEMPLATE_PX:
-                return ["the calibrated icon is too small for this window; recalibrate"]
-        return []
 
     # -- the bot ----------------------------------------------------------------------------
 
@@ -367,7 +328,6 @@ class Presenter:
             self.level_dbfs, self.last_scores, lines, items, self.trace,
             listening=self.meter_running or self._record_level is not None,
             verify_status=self.verify_status,
-            calibrate_status=self.calibrate_status,
         )  # fmt: skip
 
     def _add_scores(self, event: ev.Scores) -> None:
@@ -408,10 +368,6 @@ class Presenter:
 
     def _describe_result(self, item: object) -> str:
         match item:
-            case CalibrateDone(calibration=cal):
-                self.last_calibration = item
-                ok = "ok" if cal.valid else "no gold icon found; cast first and try again"
-                return f"Calibration: {cal.icon_size_px} px, score {cal.score:.2f} ({ok})"
             case VerifyDone(report=r):
                 if r.stands_out:
                     lo = min(b.score for b in r.bites)
@@ -429,49 +385,6 @@ class Presenter:
         return str(item)
 
     # -- setup workers ----------------------------------------------------------------------
-
-    def grab_and_calibrate(self, window: Any) -> None:
-        """Watch the window the user picked for the gear icon and measure it."""
-        threading.Thread(
-            target=self._calibrate_worker, args=(window,), name="wowfish-calibrate", daemon=True
-        ).start()
-
-    def _calibrate_worker(self, window: Any) -> None:
-        from wowfish.vision.calibrate import calibrate_icon_scale
-        from wowfish.vision.template import load_icon_templates
-
-        result: object
-        try:
-            cap = self._get_capturer(window)
-            cap.open(window)
-            templates = load_icon_templates()
-            deadline = time.monotonic() + CALIBRATE_WATCH_S
-            try:
-                while True:  # until a frame shows the gear, so there is time to go and cast
-                    left = max(0.0, deadline - time.monotonic())
-                    self.calibrate_status = (
-                        f"Watching {window.title} for the gold gear icon ({left:.0f} s left). "
-                        "Cast now and keep the game on screen."
-                    )
-                    frame = cap.grab()
-                    cal = calibrate_icon_scale(
-                        frame, templates, match_width=self.cfg.vision.match_width
-                    )
-                    if cal.valid or time.monotonic() >= deadline:
-                        break
-                    time.sleep(CALIBRATE_REST_S)
-            finally:
-                cap.close()
-            thumb, scale = image.thumbnail(frame)
-            side = max(2, round(cal.icon_size_px * scale))
-            box = (round(cal.x * scale - side / 2), round(cal.y * scale - side / 2), side, side)
-            png = image.bgr_to_png_bytes(image.with_box(thumb, box) if cal.valid else thumb)
-            result = CalibrateDone(cal, png)
-        except Exception as e:
-            result = WorkerFailed("calibrate", str(e))
-        finally:
-            self.calibrate_status = ""  # before the result, so the result's words stay up
-        self._results.put(result)
 
     def record_and_verify(
         self, seconds: float = 60.0, window: Any = None, device: str | None = None

@@ -194,22 +194,6 @@ def probe_input() -> ProbeResult:
     return ProbeResult("input", "ok" if ok else "fail", "; ".join(c[1] for c in checks))
 
 
-def probe_calibration() -> ProbeResult:
-    from wowfish.config import ConfigError, load_config
-
-    hint = (
-        "run `wowfish calibrate --save` on a screenshot showing the gear icon (or the GUI's Setup)"
-    )
-    try:
-        cfg, _ = load_config()
-    except ConfigError as e:
-        return ProbeResult("calibration", "fail", str(e))
-    size = cfg.vision.icon_size_px
-    if size <= 0:
-        return ProbeResult("calibration", "warn", f"icon not calibrated; {hint}")
-    return ProbeResult("calibration", "ok", f"{size} px")
-
-
 def probe_config() -> ProbeResult:
     from wowfish.config import ConfigError, load_config
 
@@ -231,6 +215,5 @@ def default_probes() -> list[Probe]:
         *([probe_audio] if macos() else []),
         probe_game_audio,
         probe_input,
-        probe_calibration,
         probe_config,
     ]

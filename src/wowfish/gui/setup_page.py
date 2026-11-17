@@ -1,13 +1,10 @@
-"""Setup tab: prerequisites, keys, audio device with a live meter, calibration, bite check."""
+"""Setup tab: prerequisites, keys, audio with a live meter, bite check."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from wowfish.gui import image
 from wowfish.gui.presenter import (
-    CALIBRATE_WATCH_S,
-    CalibrateDone,
     Presenter,
     VerifyDone,
     View,
@@ -25,16 +22,13 @@ CHECKLIST = (
     "  6. Optional: put a macro with /quit on an action bar key and enter it as the quit key;\n"
     "     when the time limit below runs out, the bot presses it to close the game.\n"
     "Then press Start on the Fish tab. The first cast of every run measures the gear icon, so\n"
-    "the bite check and the calibration below are optional: use them when fishing misbehaves."
+    "the bite check below is optional: use it when the bot misses splashes."
 )
 LURE_HINT = (
     "Optional. A macro like /use Shiny Bauble + /use 16 that puts a lure on the pole; it is "
     "pressed before the first cast and again whenever the lure runs out. Empty = no lure."
 )
 VERIFY_HINT = "Click, then fish by hand in the game until a fish bites (it records for 60 s)."
-CALIBRATE_HINT = (
-    f"Click, then cast in the game: it watches for the gold gear for up to {CALIBRATE_WATCH_S:g} s."
-)
 
 
 class SetupPage:
@@ -143,28 +137,6 @@ class SetupPage:
         self.bite_note = tb.Label(bite_row, text="A splash must score at least this to count.")
         self.bite_note.pack(side="left", padx=6)
 
-        cal = tb.Labelframe(f, text="Icon calibration (what the bot looks for)", padding=8)
-        cal.pack(fill="both", expand=True, pady=4)
-        self.cal_button = tb.Button(
-            cal, text="Calibrate the gear icon", command=self._calibrate, bootstyle="info"
-        )
-        self.cal_button.grid(row=0, column=0, sticky="w")
-        size = presenter.cfg.vision.icon_size_px
-        current = f"Saved: {size} px. " if size > 0 else "Not calibrated yet. "
-        self.cal_note = tb.Label(cal, text=current + CALIBRATE_HINT, wraplength=560, justify="left")
-        self.cal_note.grid(row=0, column=1, sticky="w", padx=6)
-        self.save_cal = tb.Button(
-            cal,
-            text="Save calibration",
-            command=self._save_cal,
-            bootstyle="success",
-            state="disabled",
-        )
-        self.save_cal.grid(row=0, column=2, padx=6)
-        self.cal_image = tb.Label(cal)
-        self.cal_image.grid(row=1, column=0, columnspan=3, pady=(8, 0), sticky="w")
-        self._photo = None
-
     # -- actions ----------------------------------------------------------------------------
 
     def _save_keys(self) -> None:
@@ -237,25 +209,6 @@ class SetupPage:
         self.verify_note.configure(text="Starting the recording...")
         self.p.record_and_verify(60.0, window=window, device=self._selected_device())
 
-    def _calibrate(self) -> None:
-        blocked = self._blocked()
-        if blocked:
-            self.cal_note.configure(text=blocked)
-            return
-        self._save_cal_was = str(self.save_cal.cget("state"))
-        self.cal_button.configure(state="disabled")
-        self.save_cal.configure(state="disabled")
-        pick_window(self.frame, self._calibrate_with)
-
-    def _calibrate_with(self, window: Any) -> None:
-        if window is None:
-            self.cal_note.configure(text="No window picked; nothing changed.")
-            self.cal_button.configure(state="normal")
-            self.save_cal.configure(state=self._save_cal_was)
-            return
-        self.cal_note.configure(text="Starting...")
-        self.p.grab_and_calibrate(window)
-
     def _save_bite(self) -> None:
         try:
             saved = self.p.save_bite_threshold(self.bite.get())
@@ -263,10 +216,6 @@ class SetupPage:
             self.bite_note.configure(text=str(e))
             return
         self.bite_note.configure(text=f"saved {saved:.2f}; used from the next Start")
-
-    def _save_cal(self) -> None:
-        self.p.save_calibration()
-        self.cal_note.configure(text=self.cal_note.cget("text") + "  (saved)")
 
     # -- rendering --------------------------------------------------------------------------
 
@@ -285,26 +234,8 @@ class SetupPage:
             self.level_text.configure(text=heard + level + score)
         if view.verify_status:
             self.verify_note.configure(text=view.verify_status)
-        if view.calibrate_status:
-            self.cal_note.configure(text=view.calibrate_status)
         for item, line in zip(view.log_events, view.new_lines, strict=True):
             match item:
-                case CalibrateDone(calibration=cal):
-                    self._photo = image.photo_from_png(item.thumbnail_png)
-                    self.cal_image.configure(image=self._photo)
-                    if cal.valid:
-                        self.cal_note.configure(
-                            text=f"Found it: {cal.icon_size_px} px, score {cal.score:.2f}. "
-                            "Save calibration to keep it."
-                        )
-                        self.save_cal.configure(state="normal")
-                    else:
-                        self.cal_note.configure(
-                            text=f"No gold gear icon seen in {CALIBRATE_WATCH_S:g} s. "
-                            "Is SoftTargetIconGameObject on "
-                            "and the bobber close enough to interact with? Try again."
-                        )
-                    self.cal_button.configure(state="normal")
                 case VerifyDone(report=report):
                     self.verify_note.configure(text=line)
                     if report.stands_out:  # suggest, but only Save changes the config
@@ -315,9 +246,6 @@ class SetupPage:
                 case WorkerFailed(what="verify the bite"):
                     self.verify_note.configure(text=line)
                     self._verify_finished()
-                case WorkerFailed(what="calibrate"):
-                    self.cal_note.configure(text=line)
-                    self.cal_button.configure(state="normal")
                 case WorkerFailed():
                     self._meter_error = line
 

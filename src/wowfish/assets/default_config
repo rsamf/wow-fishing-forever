@@ -19,7 +19,8 @@ lure_key = ""
 lure_minutes = 10.0
 
 [vision]
-# On-screen size of the interact icon in pixels. 0 = not calibrated; `wowfish calibrate` sets it.
+# On-screen size of the interact icon in pixels. The bot measures it on the first cast of every
+# run and saves it here; 0 = not measured yet.
 icon_size_px = 0
 icon_native_size = 0
 # Minimum match score (0..1) to accept the icon.

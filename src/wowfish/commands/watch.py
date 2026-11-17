@@ -105,13 +105,13 @@ def watch(
                     cal = calibrate_icon_scale(frame, templates, match_width=cfg.vision.match_width)
                     if not cal.valid:
                         typer.echo(
-                            f"t={t:7.2f}s not calibrated and no gold icon in this frame; waiting"
+                            f"t={t:7.2f}s no saved icon size, no gold icon in this frame; waiting"
                         )
                         continue
                     size = cal.icon_size_px
                     typer.echo(
-                        f"not calibrated; using icon_size_px={size} from this frame "
-                        f"(score {cal.score:.2f}); run `wowfish calibrate --save` to persist"
+                        f"no saved icon size; using icon_size_px={size} from this frame "
+                        f"(score {cal.score:.2f})"
                     )
                 matcher = IconMatcher(template_for_size(templates, size), cfg.vision.match_width)
                 px = matcher.template_px(frame.shape[1])
@@ -119,8 +119,8 @@ def watch(
                     fail(
                         f"icon_size_px={size} is {px} px after downscaling this "
                         f"{frame.shape[1]}-wide frame to match_width={cfg.vision.match_width} "
-                        f"(minimum {MIN_TEMPLATE_PX}); run `wowfish calibrate --save` on a "
-                        "screenshot with the gear icon visible"
+                        f"(minimum {MIN_TEMPLATE_PX}); set vision.icon_size_px = 0 "
+                        "to measure it from the frame"
                     )
                 search = IconSearch(matcher, threshold)
             phase, m = search.step(frame)

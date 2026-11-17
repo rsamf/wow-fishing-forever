@@ -8,7 +8,7 @@ from wowfish.commands._common import fail
 
 
 def gui() -> None:
-    """Open the wowfish window (setup, calibration, bite check, and the bot itself)."""
+    """Open the wowfish window (setup, bite check, and the bot itself)."""
     try:
         import tkinter  # noqa: F401
 
