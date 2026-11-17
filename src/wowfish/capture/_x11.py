@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from wowfish.capture import Box, WindowRef
+from wowfish.capture import Box, WindowRef, best_title_match
 from wowfish.errors import NotSupported
 
 _ZPIXMAP = 2
@@ -188,9 +188,7 @@ def find_window_x11(title_substring: str, pid: int | None = None) -> WindowRef |
         if pid is not None:
             owned = [r for r in clients if pid in (r.pid, _xres_pid(d, r.handle or 0))]
             clients = owned or clients
-        if not clients:
-            return None
-        return max(clients, key=lambda r: r.width * r.height)
+        return best_title_match(clients, title_substring)
     finally:
         d.close()
 

@@ -31,6 +31,8 @@ def order_choices(
     windows: Sequence[WindowRef], guess: WindowRef | None, app_of: Callable[[WindowRef], str]
 ) -> list[WindowChoice]:
     """The guess first and only once, then the rest from the largest down."""
+    if guess is not None:  # the copy from the list is the complete one (its pid filled in)
+        guess = next((w for w in windows if same_window(guess, w)), guess)
     rest = [w for w in windows if guess is None or not same_window(guess, w)]
     rest.sort(key=lambda w: w.width * w.height, reverse=True)
     first = [WindowChoice(guess, app_of(guess), True)] if guess is not None else []

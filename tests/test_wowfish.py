@@ -299,6 +299,12 @@ def test_window_picker_lists_every_window_guess_first(monkeypatch):
     assert [c.window for c in order_choices([term], game, lambda w: "")] == [game, term]
     unguessed = order_choices([term, tab], None, lambda w: "")
     assert [(c.window, c.guess) for c in unguessed] == [(tab, False), (term, False)]
+    # the guess is the window as listed (its pid filled in), and a window titled exactly like
+    # the game beats a larger one that only mentions it
+    assert order_choices([game], replace(game, pid=None), lambda w: "")[0].window == game
+    assert capture.best_title_match([tab, game, term], "world of warcraft") == game
+    assert capture.best_title_match([tab, term], "World of Warcraft") == tab
+    assert capture.best_title_match([term], "World of Warcraft") is None
 
     argb = [2, 2, 0xFF0000FF, 0x80FF0000, 0x00000000, 0xFFFFFFFF]  # blue, half red, clear, white
     icon = icon_from_net_wm_icon([1, 1, 0xFF00FF00, *argb], 2)
@@ -430,6 +436,8 @@ def test_macos_window_focus_and_keys(monkeypatch):
     hidden = pick_quartz_window([{**i, "name": None} for i in infos], "World of Warcraft")
     assert hidden is not None and (hidden.title, hidden.handle) == ("World of Warcraft", 3)
     assert pick_quartz_window(infos, "Hearthstone") is None
+    big_tab = win(6, "World of Warcraft - Wowhead", "Safari", 60, (0, 0, 3840, 2160))
+    assert pick_quartz_window([*infos, big_tab], "world of warcraft") == w
     assert (frontmost_pid(infos), frontmost_pid(infos[2:])) == (50, 77)
 
     assert set(MAC_KEYCODES) == set(SUPPORTED_KEYS)
@@ -504,6 +512,7 @@ def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
     with pytest.raises(AudioUnavailable, match="install BlackHole"):
         devices.open_loopback("")
     assert devices.MAC_NO_GAME_AUDIO in p.prerequisites()
+    assert p.default_device() is None  # the microphone is never offered as the default
     assert devices.open_loopback("MacBook").mic is mics[0]  # named: used as given
 
 

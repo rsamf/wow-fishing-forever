@@ -231,8 +231,8 @@ class Presenter:
             return []
 
     def default_device(self) -> Any | None:
-        found = self.audio_devices()
-        return next((d for d in found if d.is_default), found[0] if found else None)
+        """The device to preselect: a virtual one, or none at all. Never the microphone."""
+        return next((d for d in self.audio_devices() if d.is_default), None)
 
     def save_audio_device(self, device: str) -> None:
         """macOS: the input device the game's sound is routed into ("" = BlackHole or the like)."""

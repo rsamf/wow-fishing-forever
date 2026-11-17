@@ -13,7 +13,7 @@ import sys
 from functools import cache
 from typing import Any
 
-from wowfish.capture import WindowRef
+from wowfish.capture import WindowRef, best_title_match
 from wowfish.errors import NotSupported
 
 CORE_GRAPHICS = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
@@ -191,14 +191,7 @@ def quartz_windows(infos: list[dict[str, Any]]) -> list[WindowRef]:
 
 def pick_quartz_window(infos: list[dict[str, Any]], title_substring: str) -> WindowRef | None:
     """The largest visible window whose title contains the text (any case)."""
-    want = title_substring.lower()
-    best: WindowRef | None = None
-    for ref in quartz_windows(infos):
-        if want in ref.title.lower() and (
-            best is None or ref.width * ref.height > best.width * best.height
-        ):
-            best = ref
-    return best
+    return best_title_match(quartz_windows(infos), title_substring)
 
 
 def refreshed_from_infos(infos: list[dict[str, Any]], window: WindowRef) -> WindowRef | None:

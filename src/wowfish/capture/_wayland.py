@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 
-from wowfish.capture import Box, WindowRef
+from wowfish.capture import Box, WindowRef, best_title_match
 from wowfish.errors import NotSupported
 
 GRIM = "grim"
@@ -93,9 +93,7 @@ def pick_hyprland_window(
     clients: Sequence[dict[str, Any]], monitors: Sequence[dict[str, Any]], title_substring: str
 ) -> WindowRef | None:
     """The largest mapped window whose title contains the text, sized in its output's pixels."""
-    wanted = title_substring.lower()
-    found = [r for r in hyprland_windows(clients, monitors) if wanted in r.title.lower()]
-    return max(found, key=lambda r: r.width * r.height, default=None)
+    return best_title_match(hyprland_windows(clients, monitors), title_substring)
 
 
 def find_window_hyprland(title_substring: str) -> WindowRef | None:

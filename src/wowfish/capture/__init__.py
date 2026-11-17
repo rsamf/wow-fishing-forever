@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -50,6 +51,18 @@ def linux_hyprland() -> bool:
 
 def macos() -> bool:
     return sys.platform == "darwin"
+
+
+def best_title_match(windows: Sequence[WindowRef], title_substring: str) -> WindowRef | None:
+    """The window most likely meant by the title: one titled exactly so beats one that only
+    mentions it (a browser tab about the game), and among equals the largest wins."""
+    wanted = title_substring.lower()
+    found = [w for w in windows if wanted in w.title.lower()]
+    return max(
+        found,
+        key=lambda w: (w.title.strip().lower() == wanted, w.width * w.height),
+        default=None,
+    )
 
 
 def same_window(a: WindowRef, b: WindowRef) -> bool:
@@ -197,6 +210,7 @@ __all__ = [
     "Box",
     "Capturer",
     "WindowRef",
+    "best_title_match",
     "find_window",
     "get_capturer",
     "linux_hyprland",

@@ -7,7 +7,7 @@ import ctypes
 import sys
 from typing import Any
 
-from wowfish.capture import Box, WindowRef
+from wowfish.capture import Box, WindowRef, best_title_match
 
 DWMWA_CLOAKED = 14
 GW_OWNER = 4
@@ -90,9 +90,7 @@ def list_windows_win32() -> list[WindowRef]:
 
 
 def find_window_win32(title_substring: str) -> WindowRef | None:
-    wanted = title_substring.lower()
-    found = [r for r in list_windows_win32() if wanted in r.title.lower()]
-    return max(found, key=lambda r: r.width * r.height, default=None)
+    return best_title_match(list_windows_win32(), title_substring)
 
 
 def refresh_win32(window: WindowRef) -> WindowRef | None:
