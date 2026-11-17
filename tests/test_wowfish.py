@@ -6,6 +6,7 @@ system, or Tk is touched, so a failure means the code or the assets changed, not
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import random
 import subprocess
@@ -508,7 +509,8 @@ def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
 
 def test_audio_follows_the_picked_window(monkeypatch):
     """Linux hears the stream of the picked window's process, or of a process it started (the
-    way Windows captures a process tree), and never a stream that merely has the game's name; a
+    way Windows captures a process tree), and never a stream that merely has the game's name. A
+    native PipeWire client's stream has no pid of its own, so its client's pid is used. A
     silent window, or one whose process is unknown, gets an error naming it, on Windows too."""
     S = _pipewire.AppStream
     streams = [S(1, "World of Warcraft", 500, "wine64-preloader"), S(2, "Firefox", 600, "firefox"),
@@ -518,6 +520,19 @@ def test_audio_follows_the_picked_window(monkeypatch):
     assert _pipewire.pick_stream(streams, 700, parents).serial == 3  # sound from a child
     assert _pipewire.pick_stream(streams, 400, parents) is None  # not by name
     assert _pipewire.pick_stream([S(4, "x", 901, "x")], 900, {901: 902, 902: 901}.get) is None
+
+    def node(serial, **props):
+        props = {"media.class": "Stream/Output/Audio", "object.serial": serial, **props}
+        return {"type": "PipeWire:Interface:Node", "info": {"props": props}}
+
+    dump = json.dumps([
+        node(11, **{"application.name": "Wine", "application.process.id": 500, "client.id": 7}),
+        node(12, **{"application.name": "pw-play", "client.id": 8}),  # a native client: no pid
+        {"id": 8, "type": "PipeWire:Interface:Client",
+         "info": {"props": {"pipewire.sec.pid": 321}}},
+    ])  # fmt: skip
+    listed = _pipewire.list_app_streams(dump=lambda: dump)
+    assert [(s.serial, s.pid) for s in listed] == [(11, 500), (12, 321)]
 
     window = WindowRef("Mundo de Warcraft", 400, 0, 0, 10, 10, handle=1)
     monkeypatch.setattr(_pipewire, "_parent_pid", lambda pid: None)  # never read the real /proc

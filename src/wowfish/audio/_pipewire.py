@@ -60,12 +60,24 @@ def list_app_streams(*, dump: Callable[[], str] | None = None) -> list[AppStream
         objects = json.loads(text)
     except ValueError as e:
         raise AudioUnavailable(f"unexpected pw-dump output: {e}") from e
+
+    def props_of(obj: object) -> dict:
+        return ((obj.get("info") or {}).get("props") or {}) if isinstance(obj, dict) else {}
+
+    # A native PipeWire client's stream carries no pid; its client object does (the pid the
+    # daemon read off the socket). Streams through pipewire-pulse (Wine) name their own.
+    client_pids: dict[object, int] = {}
+    for obj in objects:
+        if isinstance(obj, dict) and str(obj.get("type", "")).endswith(":Client"):
+            pid = props_of(obj).get("application.process.id", props_of(obj).get("pipewire.sec.pid"))
+            if pid is not None:
+                client_pids[obj.get("id")] = int(pid)
     out: list[AppStream] = []
     for obj in objects:
-        props = ((obj.get("info") or {}).get("props") or {}) if isinstance(obj, dict) else {}
+        props = props_of(obj)
         if props.get("media.class") != STREAM_CLASS or "object.serial" not in props:
             continue
-        pid = props.get("application.process.id")
+        pid = props.get("application.process.id", client_pids.get(props.get("client.id")))
         out.append(
             AppStream(
                 int(props["object.serial"]),
