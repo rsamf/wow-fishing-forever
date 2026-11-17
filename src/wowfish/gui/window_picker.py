@@ -79,9 +79,9 @@ class _Picker:
         top.protocol("WM_DELETE_WINDOW", lambda: self._finish(None))
         top.bind("<Escape>", lambda _e: self._finish(None))
         top.bind("<Return>", lambda _e: self._use())
-        tb.Label(
-            top, text="Pick the window the bot should watch, press keys into and listen to."
-        ).pack(anchor="w", padx=12, pady=(12, 6))
+        tb.Label(top, text="Pick your World of Warcraft client").pack(
+            anchor="w", padx=12, pady=(12, 6)
+        )
 
         buttons = tb.Frame(top)
         buttons.pack(side="bottom", fill="x", padx=12, pady=12)
@@ -159,10 +159,6 @@ class _Picker:
             detail = tb.Label(card, text=about, bootstyle="secondary")
             detail.pack(anchor="w", padx=4, pady=(0, 2 if choice.guess else 4))
             parts = [card, snapshot, title, detail]
-            if choice.guess:
-                guess = tb.Label(card, text="Looks like the game", bootstyle="success")
-                guess.pack(anchor="w", padx=4, pady=(0, 4))
-                parts.append(guess)
             for part in parts:
                 part.bind("<Button-1>", lambda _e, i=i: self._select(i))
                 part.bind("<Double-Button-1>", lambda _e, i=i: self._use(i))

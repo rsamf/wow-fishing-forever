@@ -65,8 +65,7 @@ def pick_window_or_fail(
     for n, c in enumerate(choices, 1):
         w = c.window
         title = w.title if len(w.title) <= TITLE_MAX else w.title[: TITLE_MAX - 1] + "…"
-        guess = "  (looks like the game)" if c.guess else ""
-        typer.echo(f"{n}) {title} — {c.app or '?'} — {w.width}x{w.height}{guess}", err=True)
+        typer.echo(f"{n}) {title} — {c.app or '?'} — {w.width}x{w.height}", err=True)
     while True:
         try:
             reply = ask("Window [1]: ").strip()

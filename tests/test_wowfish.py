@@ -332,7 +332,7 @@ def test_terminal_picker_reads_a_window_number(capsys):
 
     assert pick_window_or_fail([a, b], ask=answers("")) == a.window
     err = capsys.readouterr().err
-    assert "1) 魔兽世界 — Wow.exe — 2560x1440  (looks like the game)" in err
+    assert "1) 魔兽世界 — Wow.exe — 2560x1440" in err
     assert f"2) {'x' * 69}… — ? — 800x600" in err
     assert pick_window_or_fail([a, b], ask=answers("0", "-1", "1.5", "x", " 2 ")) == b.window
     assert capsys.readouterr().err.count("type a number from 1 to 2") == 4
