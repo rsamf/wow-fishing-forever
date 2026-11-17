@@ -7,7 +7,7 @@ import ctypes
 import sys
 from typing import Any
 
-from wowfish.capture import Box, WindowRef, best_title_match
+from wowfish.capture import Box, WindowRef
 
 DWMWA_CLOAKED = 14
 GW_OWNER = 4
@@ -87,10 +87,6 @@ def list_windows_win32() -> list[WindowRef]:
 
     user32.EnumWindows(proto(visit), 0)
     return found
-
-
-def find_window_win32(title_substring: str) -> WindowRef | None:
-    return best_title_match(list_windows_win32(), title_substring)
 
 
 def refresh_win32(window: WindowRef) -> WindowRef | None:

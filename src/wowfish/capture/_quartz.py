@@ -13,7 +13,7 @@ import sys
 from functools import cache
 from typing import Any
 
-from wowfish.capture import WindowRef, best_title_match
+from wowfish.capture import WindowRef
 from wowfish.errors import NotSupported
 
 CORE_GRAPHICS = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
@@ -115,7 +115,7 @@ def _number(cf: Any, ref: int | None, kind: int = SINT64) -> float | None:
 def window_infos(
     option: int = ON_SCREEN_ONLY | EXCLUDE_DESKTOP, relative_to: int = 0
 ) -> list[dict[str, Any]]:
-    """Every on-screen window, front to back, as plain dicts (see pick_quartz_window); or, with
+    """Every on-screen window, front to back, as plain dicts (see quartz_windows); or, with
     INCLUDING_WINDOW, the one window numbered `relative_to` wherever it is.
 
     Without the Screen Recording permission macOS leaves out other apps' window names.
@@ -189,11 +189,6 @@ def quartz_windows(infos: list[dict[str, Any]]) -> list[WindowRef]:
     return found
 
 
-def pick_quartz_window(infos: list[dict[str, Any]], title_substring: str) -> WindowRef | None:
-    """The largest visible window whose title contains the text (any case)."""
-    return best_title_match(quartz_windows(infos), title_substring)
-
-
 def refreshed_from_infos(infos: list[dict[str, Any]], window: WindowRef) -> WindowRef | None:
     """The window where `infos` now has it, by its number; None when it is not among them."""
     from dataclasses import replace
@@ -212,10 +207,6 @@ def list_windows_quartz() -> list[WindowRef]:
 def frontmost_pid(infos: list[dict[str, Any]]) -> int | None:
     """The process that owns the front-most visible app window (the list runs front to back)."""
     return next((info.get("pid") for info in infos if _visible(info)), None)
-
-
-def find_window_quartz(title_substring: str) -> WindowRef | None:
-    return pick_quartz_window(window_infos(), title_substring)
 
 
 def snapshot_quartz(number: int) -> Any:

@@ -13,7 +13,7 @@ import numpy as np
 from wowfish.capture import (
     GAME_TITLE,
     WindowRef,
-    find_window,
+    best_title_match,
     linux_x11,
     list_windows,
     same_window,
@@ -88,7 +88,8 @@ def app_name(window: WindowRef) -> str:
 
 def window_choices(title: str = GAME_TITLE) -> list[WindowChoice]:
     """Every window the user can pick, the title guess first. Platform errors propagate."""
-    return order_choices(list_windows(), find_window(title), app_name)
+    windows = list_windows()  # listed once: the guess is one of these
+    return order_choices(windows, best_title_match(windows, title), app_name)
 
 
 def _snapshot(window: WindowRef) -> np.ndarray | None:

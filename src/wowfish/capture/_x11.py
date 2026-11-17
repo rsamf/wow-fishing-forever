@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from wowfish.capture import Box, WindowRef, best_title_match
+from wowfish.capture import Box, WindowRef
 from wowfish.errors import NotSupported
 
 _ZPIXMAP = 2
@@ -173,26 +173,6 @@ def list_windows_x11() -> list[WindowRef]:
         d.close()
 
 
-def find_window_x11(title_substring: str, pid: int | None = None) -> WindowRef | None:
-    """The largest viewable match, among those of process `pid` when any of them is.
-
-    Hyprland reports a pid from _NET_WM_PID or from the X server's record, and the two differ
-    when the game runs in a container with its own pid namespace, so either one counts.
-    """
-    from Xlib import display
-
-    d = display.Display()
-    try:
-        wanted = title_substring.lower()
-        clients = [r for r in _titled_windows(d) if wanted in r.title.lower()]
-        if pid is not None:
-            owned = [r for r in clients if pid in (r.pid, _xres_pid(d, r.handle or 0))]
-            clients = owned or clients
-        return best_title_match(clients, title_substring)
-    finally:
-        d.close()
-
-
 def refresh_x11(window: WindowRef) -> WindowRef | None:
     """The window's current place and size; None once the X server no longer knows its id."""
     from dataclasses import replace
@@ -260,7 +240,7 @@ class X11WindowCapturer:
 
     def open(self, window: WindowRef) -> None:
         if window.handle is None:
-            raise ValueError("X11 capture needs WindowRef.handle (use find_window)")
+            raise ValueError("X11 capture needs WindowRef.handle (pick one from list_windows)")
         self._lib = _libx11()
         self._dpy = self._lib.XOpenDisplay(None)
         if not self._dpy:

@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 
-from wowfish.capture import Box, WindowRef, best_title_match
+from wowfish.capture import Box, WindowRef
 from wowfish.errors import NotSupported
 
 GRIM = "grim"
@@ -87,19 +87,6 @@ def hyprland_windows(
         for c in clients
         if c.get("title") and c.get("mapped", True) and not c.get("hidden")
     ]
-
-
-def pick_hyprland_window(
-    clients: Sequence[dict[str, Any]], monitors: Sequence[dict[str, Any]], title_substring: str
-) -> WindowRef | None:
-    """The largest mapped window whose title contains the text, sized in its output's pixels."""
-    return best_title_match(hyprland_windows(clients, monitors), title_substring)
-
-
-def find_window_hyprland(title_substring: str) -> WindowRef | None:
-    return pick_hyprland_window(
-        hyprland_request("clients"), hyprland_request("monitors"), title_substring
-    )
 
 
 def refresh_hyprland(

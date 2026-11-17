@@ -114,39 +114,8 @@ def list_windows() -> list[WindowRef]:
 
 
 def find_window(title_substring: str = GAME_TITLE) -> WindowRef | None:
-    """The largest viewable window whose title contains the text: the picker's first guess.
-
-    On Hyprland the compositor picks it from all its windows, native Wayland and Xwayland alike;
-    an Xwayland winner is then looked up through X11 by its pid. Elsewhere X11, then Windows,
-    then macOS (in points, which mss grabs as is); else None.
-    """
-    pid: int | None = None
-    if linux_hyprland():
-        from wowfish.capture._wayland import find_window_hyprland
-
-        try:
-            found = find_window_hyprland(title_substring)
-        except (NotSupported, OSError, ValueError):
-            if not linux_x11():
-                raise
-            # Hyprland's IPC did not answer; X11 alone still finds an Xwayland game
-        else:
-            if found is None or found.compositor:
-                return found
-            pid = found.pid
-    if linux_x11():
-        from wowfish.capture._x11 import find_window_x11
-
-        return find_window_x11(title_substring, pid)
-    if sys.platform == "win32":
-        from wowfish.capture import _win32
-
-        return _win32.find_window_win32(title_substring)
-    if macos():
-        from wowfish.capture._quartz import find_window_quartz
-
-        return find_window_quartz(title_substring)
-    return None
+    """The picker's first guess: the best title match in the list the picker shows."""
+    return best_title_match(list_windows(), title_substring)
 
 
 def refresh_window(window: WindowRef) -> WindowRef | None:

@@ -33,14 +33,12 @@ from wowfish.audio.features import DEFAULT_MEL
 from wowfish.capture import WindowRef, _quartz, _wayland, _x11
 from wowfish.capture._quartz import (
     frontmost_pid,
-    pick_quartz_window,
     quartz_windows,
     refreshed_from_infos,
 )
 from wowfish.capture._wayland import (
     hyprland_windows,
     on_shown_workspace,
-    pick_hyprland_window,
     refresh_hyprland,
 )
 from wowfish.capture._x11 import icon_from_net_wm_icon
@@ -284,12 +282,13 @@ def test_window_picker_lists_every_window_guess_first(monkeypatch):
     game = WindowRef("World of Warcraft", 77, 0, 0, 2560, 1440, handle=3)
     tab = WindowRef("World of Warcraft - Wowhead", 60, 0, 0, 3000, 2000, handle=4)
     term = WindowRef("Terminal", 50, 0, 0, 800, 500, handle=2)
-    own = WindowRef("wowfish 1.0", os.getpid(), 0, 0, 900, 640, handle=9)
+    own = WindowRef("World of Warcraft", os.getpid(), 0, 0, 9000, 6400, handle=9)
     tiny = WindowRef("tooltip", 50, 0, 0, 40, 20, handle=5)
     untitled = WindowRef("  ", 50, 0, 0, 800, 600, handle=6)
     monkeypatch.setattr(capture, "_platform_windows",
                         lambda: [term, own, game, tiny, tab, untitled])  # fmt: skip
     assert capture.list_windows() == [term, game, tab]
+    assert capture.find_window() == game  # from that same list: never wowfish's own window
 
     apps = {77: "Wow.exe", 60: "firefox"}
     choices = order_choices(capture.list_windows(), game, lambda w: apps.get(w.pid, ""))
@@ -345,8 +344,9 @@ def test_terminal_picker_reads_a_window_number(capsys):
 
 def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
     """Hyprland reports logical geometry for native and Xwayland windows alike; the window comes
-    back sized in its output's pixels, and the largest title match wins whichever kind it is. An
-    Xwayland winner is then looked up through X11 by its pid. Each key resolves to its evdev
+    back sized in its output's pixels, and the largest title match wins whichever kind it is. The
+    native ones and the Xwayland ones, as X11 sees them, make one list, and the guess comes from
+    it. Each key resolves to its evdev
     keycode (xkb code - 8) whether the keymap names keysyms (xkbcommon) or writes them in hex
     (Hyprland), through aliases and from a shifted level (the digits on AZERTY)."""
 
@@ -367,13 +367,13 @@ def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
         ("World of Warcraft - Wowhead", "hyprland"), ("World of Warcraft", "hyprland"),
         ("Discord", "hyprland"), ("World of Warcraft", None),
     ]  # fmt: skip
-    w = pick_hyprland_window(clients, monitors, "world of warcraft")
+    w = capture.best_title_match(hyprland_windows(clients, monitors), "world of warcraft")
     assert w is not None
     assert (w.title, w.pid, w.left, w.top, w.width, w.height) == (
         "World of Warcraft", 42, 2560, 0, 3840, 2160,
     )  # fmt: skip
     assert (w.handle, w.compositor, w.scale) == (0x2A, "hyprland", 1.2)
-    assert pick_hyprland_window(clients, monitors, "Hearthstone") is None
+    assert capture.best_title_match(hyprland_windows(clients, monitors), "Hearthstone") is None
     moved = [{**c, "at": [0, 0], "monitor": 2} if c["address"] == "0x2a" else c for c in clients]
     r = refresh_hyprland(moved, monitors, w)
     assert r is not None and (r.left, r.top, r.width, r.height, r.scale) == (0, 0, 6400, 3600, 2.0)
@@ -385,18 +385,19 @@ def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
     assert not on_shown_workspace({"monitor": 1, "workspace": {"id": 4}}, shown)
 
     clients.append(client("0x5d", "World of Warcraft", [0, 0], [2560, 1440], 2, 7, xwayland=True))
-    x = pick_hyprland_window(clients, monitors, "world of warcraft")
+    x = capture.best_title_match(hyprland_windows(clients, monitors), "world of warcraft")
     assert x is not None
     assert (x.pid, x.width, x.height, x.handle, x.compositor) == (7, 5120, 2880, None, None)
 
-    asked: list[int | None] = []
+    # the guess comes from the one list the picker shows: Hyprland's native windows plus the
+    # Xwayland ones as X11 sees them
+    on_x11 = WindowRef("World of Warcraft", 7, 0, 0, 5120, 2880, handle=99)
     monkeypatch.setattr(capture, "linux_hyprland", lambda: True)
     monkeypatch.setattr(capture, "linux_x11", lambda: True)
-    monkeypatch.setattr(_x11, "find_window_x11", lambda _, pid: asked.append(pid))
-    for winner, x11_asked in ((w, []), (x, [7])):
-        monkeypatch.setattr(_wayland, "find_window_hyprland", lambda _, found=winner: found)
-        capture.find_window()
-        assert asked == x11_asked
+    monkeypatch.setattr(_wayland, "list_windows_hyprland", lambda: [w])
+    monkeypatch.setattr(_x11, "list_windows_x11", lambda: [on_x11])
+    assert capture.list_windows() == [w, on_x11]
+    assert capture.find_window() == on_x11
 
     for symbols in (NAMED_SYMBOLS, HEX_SYMBOLS):
         codes = keycodes_from_keymap(KEYMAP % symbols)
@@ -422,7 +423,7 @@ def test_macos_window_focus_and_keys(monkeypatch):
         win(4, "World of Warcraft - Wowhead", "Safari", 60, (0, 0, 600, 400)),
         win(5, "World of Warcraft", "World of Warcraft", 77, (0, 0, 4000, 3000), alpha=0.0),
     ]
-    w = pick_quartz_window(infos, "world of warcraft")
+    w = capture.best_title_match(quartz_windows(infos), "world of warcraft")
     assert w is not None
     assert (w.title, w.pid, w.left, w.top, w.width, w.height, w.handle, w.scale) == (
         "World of Warcraft", 77, 0, 33, 1512, 949, 3, 1.0,
@@ -433,11 +434,13 @@ def test_macos_window_focus_and_keys(monkeypatch):
     assert refreshed_from_infos(infos[:2], w) is None
     again = refreshed_from_infos([{**infos[2], "bounds": (10, 40, 1512, 949)}], w)
     assert again is not None and (again.left, again.top, again.handle) == (10, 40, 3)
-    hidden = pick_quartz_window([{**i, "name": None} for i in infos], "World of Warcraft")
+    hidden = capture.best_title_match(
+        quartz_windows([{**i, "name": None} for i in infos]), "World of Warcraft"
+    )
     assert hidden is not None and (hidden.title, hidden.handle) == ("World of Warcraft", 3)
-    assert pick_quartz_window(infos, "Hearthstone") is None
+    assert capture.best_title_match(quartz_windows(infos), "Hearthstone") is None
     big_tab = win(6, "World of Warcraft - Wowhead", "Safari", 60, (0, 0, 3840, 2160))
-    assert pick_quartz_window([*infos, big_tab], "world of warcraft") == w
+    assert capture.best_title_match(quartz_windows([*infos, big_tab]), "world of warcraft") == w
     assert (frontmost_pid(infos), frontmost_pid(infos[2:])) == (50, 77)
 
     assert set(MAC_KEYCODES) == set(SUPPORTED_KEYS)
