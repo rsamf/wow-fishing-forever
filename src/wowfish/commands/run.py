@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import queue
 import time
-from pathlib import Path
-from typing import Annotated
 
 import typer
 from loguru import logger
@@ -34,13 +32,6 @@ def run(
     minutes: float | None = typer.Option(
         None, "--minutes", min=0.0, help="Stop after this long (default: game.session_minutes)."
     ),
-    record_audio: Annotated[
-        Path | None,
-        typer.Option(
-            "--record-audio",
-            help="Save everything the bot hears to this WAV when it stops (for `verify-bite`).",
-        ),
-    ] = None,
 ) -> None:
     """Cast, find the bobber, hear the splash, press Interact, loot, repeat. Ctrl-C stops."""
     cfg = load_config_or_fail()
@@ -51,7 +42,6 @@ def run(
             cfg,
             window,
             session_s=None if minutes is None else minutes * 60,
-            record_audio=record_audio,
         )
     except (RuntimeError, NotSupported, AudioUnavailable) as e:
         fail(str(e))
@@ -80,10 +70,8 @@ def run(
             event = engine.events.get_nowait()
             if not isinstance(event, ev.Scores):
                 typer.echo(_line(event))
-    # The engine thread is a daemon: let it close the audio (and write the WAV) before exiting.
+    # The engine thread is a daemon: let it close the audio before exiting.
     thread.stop(timeout=10.0)
-    if record_audio is not None:
-        typer.echo(f"wrote {record_audio}", err=True)
     typer.echo(engine.stats.as_line())
 
 

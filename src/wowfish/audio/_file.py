@@ -1,4 +1,4 @@
-"""Replay a WAV file as an AudioSource, for tests, `listen --from`, and `verify-bite`."""
+"""Replay a WAV file as an AudioSource, for tests and `listen --from`."""
 
 from __future__ import annotations
 

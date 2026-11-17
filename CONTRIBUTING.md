@@ -26,7 +26,7 @@ this automatically.
 
     src/wowfish/
       cli.py        typer app; registers the commands below
-      commands/     watch, listen, verify-bite, run, gui (one module each)
+      commands/     watch, listen, run, gui (one module each)
       config.py     TOML config: defaults, validation, save; adds new settings to old files at launch
       paths.py      config / cache / log locations (WOWFISH_HOME override)
       doctor.py     environment probes

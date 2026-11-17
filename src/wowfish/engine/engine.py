@@ -8,7 +8,6 @@ import random
 import time
 from collections.abc import Callable
 from dataclasses import replace
-from pathlib import Path
 from typing import Any
 
 import cv2
@@ -603,15 +602,11 @@ def build_engine(
     window: WindowRef,
     *,
     session_s: float | None = None,
-    record_audio: Path | None = None,
 ) -> FishingEngine:
     """Wire the real capturer, input device, audio source, detector, and matcher for `cfg`.
 
-    `record_audio` saves everything the engine hears to that WAV when it stops (for debugging
-    missed splashes offline). Raises RuntimeError with a one-line hint when a prerequisite is
-    missing.
+    Raises RuntimeError with a one-line hint when a prerequisite is missing.
     """
-    from wowfish.audio._recording import RecordingSource
     from wowfish.audio.detector import detector_for
     from wowfish.audio.devices import open_game_audio
     from wowfish.input import get_input_device
@@ -652,8 +647,6 @@ def build_engine(
 
     detector = detector_for(cfg.audio)
     audio: Any = ThreadedSource(open_game_audio(window, cfg.audio.device))
-    if record_audio is not None:
-        audio = RecordingSource(audio, record_audio)
     return FishingEngine(
         cfg,
         window,

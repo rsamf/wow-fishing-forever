@@ -157,12 +157,11 @@ To close the game when the time limit runs out, make a macro with `/quit`, put i
 | command | what it does |
 |---|---|
 | `wowfish gui` | The setup and fishing window |
-| `wowfish run [--minutes N] [--record-audio WAV]` | Ask which window is the game, then fish from the terminal until Ctrl-C or the session limit; optionally save everything heard |
+| `wowfish run [--minutes N]` | Ask which window is the game, then fish from the terminal until Ctrl-C or the session limit |
 | `wowfish doctor` | Check OS, display, OpenCV, game audio capture, input, config |
 | `wowfish watch --live` | Ask which window, then show what the matcher sees: phase, score, position, milliseconds per frame |
 | `wowfish watch --from DIR` | Same, over saved frames; `--save-frames` writes annotated thumbnails |
 | `wowfish listen [--record WAV]` | Ask which window, then meter its app's audio and print bites as they are heard. macOS listens to BlackHole instead: `--list` shows the input devices, `--device D` picks one |
-| `wowfish verify-bite WAV [--save]` | Score a recording against every splash clip and pick the bite |
 | `wowfish config` | Create the config file if needed and print the resolved settings |
 | `wowfish config --path` | Print only the config file location |
 | `wowfish --version` | Print the version |
