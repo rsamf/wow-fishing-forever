@@ -15,7 +15,7 @@ Install [uv](https://docs.astral.sh/uv/) and optionally [just](https://github.co
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
 | `just fmt` | `uv run ruff check --fix . && uv run ruff format .` |
 | `just build` | `uv run pyinstaller --clean --noconfirm packaging/wowfish.spec` |
-| `just smoke` | run the built executable: `--version`, `doctor`, `listen --list`, `calibrate` on the fixture |
+| `just smoke` | run the built executable: `--version`, `doctor`, `listen --list` (a one-line note on Linux and Windows), `calibrate` on the fixture |
 
 Unit tests never touch the network, the display, or audio hardware: `soundcard`, `mss`, and
 `Xlib` are imported lazily and the tests stub them. The X11 capture tests run only when

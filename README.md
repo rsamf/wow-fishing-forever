@@ -84,8 +84,9 @@ permissions, so a Mac needs a few one-time steps:
 1. **Audio.** Install [BlackHole 2ch](https://existential.audio/blackhole/). In *Audio MIDI
    Setup*, click **+** > *Create Multi-Output Device*, tick your speakers (or headphones) and
    BlackHole 2ch, and choose that device in *System Settings > Sound > Output*, so you still
-   hear the game. Then pick **BlackHole 2ch** on wowfish's Setup tab and click *Use this and
-   listen* (this sets `audio.capture = "device"`).
+   hear the game. wowfish listens to BlackHole by itself; to use another device, pick it on the
+   Setup tab and click *Use this and listen* (this sets `audio.device`). Without BlackHole or
+   another virtual device the bot does not start: it never falls back to the microphone.
 2. **Permissions.** macOS grants them to the app wowfish runs in: Terminal (double-clicking
    `wowfish-gui` opens it in Terminal too), or iTerm and the like. In *System Settings > Privacy
    & Security*, switch that app on under:
@@ -127,7 +128,7 @@ In the game:
 
 **Note to Linux users**: On GNOME, the first synthetic key press opens a "Remote Desktop" dialog. Switch on *Allow Remote Interaction* and click *Share*. Until you do, key presses are silently dropped.
 
-**Note to Wayland users**: A game running as a native Wayland client (e.g. Proton with `PROTON_ENABLE_WAYLAND=1`) is supported on Hyprland: install [`grim`](https://gitlab.freedesktop.org/emersion/grim) for screen capture; keys go through the compositor's virtual keyboard. The game must be on screen while fishing. On other compositors, run the game under Xwayland (`PROTON_ENABLE_WAYLAND=0`).
+**Note to Wayland users**: A game running as a native Wayland client (e.g. Proton with `PROTON_ENABLE_WAYLAND=1`) is supported on Hyprland: install [`grim`](https://gitlab.freedesktop.org/emersion/grim) for screen capture; keys go through the compositor's virtual keyboard. The game must be on screen while fishing. On other compositors (GNOME, KDE), run the game under Xwayland (`PROTON_ENABLE_WAYLAND=0`): native Wayland windows are hidden from other programs there, so only Xwayland windows show up in the window list.
 
 **Note to Windows users**: You may need to run the program in admin mode.
 
@@ -141,6 +142,10 @@ Or run it from terminal:
     wowfish config                      # creates the config file; edit cast_key / interact_key
     wowfish run                         # measures the icon on its first cast; Ctrl-C stops
 
+Every time you press **Start**, **Calibrate** or **Listen**, wowfish shows the windows that are open, each with its icon, title and a snapshot, and asks which one is the game. The one titled "World of Warcraft" comes first, but any window works, so a client in another language or with another title is fine. The bot watches that window, presses keys only while it is focused, and (on Linux and Windows) hears only the app that owns it. Nothing about the choice is saved.
+
+In the terminal, `run`, `listen` and `watch --live` print the same list with numbers: press Enter for the first window or type a number. A script can answer for you: `echo 1 | wowfish run`.
+
 While the bot is running, keep the water in view and the game client in focus.
 
 To vary the bot's rhythm, fill in the `[behavior]` section of the config file (`wowfish config --path`): breaks after a stretch of fishing, a reaction delay before Interact, the odd bite let go on purpose, uneven key holds, and a jump before the occasional cast. It is all off by default.
@@ -152,12 +157,12 @@ To close the game when the time limit runs out, make a macro with `/quit`, put i
 | command | what it does |
 |---|---|
 | `wowfish gui` | The setup and fishing window |
-| `wowfish run [--minutes N] [--record-audio WAV]` | Fish from the terminal until Ctrl-C or the session limit; optionally save everything heard |
-| `wowfish doctor` | Check OS, display, OpenCV, audio devices, game window, input, calibration, config |
+| `wowfish run [--minutes N] [--record-audio WAV]` | Ask which window is the game, then fish from the terminal until Ctrl-C or the session limit; optionally save everything heard |
+| `wowfish doctor` | Check OS, display, OpenCV, game audio capture, input, calibration, config |
 | `wowfish calibrate SHOT.png [--save]` | Measure the interact icon's on-screen size from a screenshot |
-| `wowfish watch --live` | Show what the matcher sees: phase, score, position, milliseconds per frame |
+| `wowfish watch --live` | Ask which window, then show what the matcher sees: phase, score, position, milliseconds per frame |
 | `wowfish watch --from DIR` | Same, over saved frames; `--save-frames` writes annotated thumbnails |
-| `wowfish listen [--list] [--device D] [--record WAV]` | Meter the game's audio (or loopback device D), print bites as they are heard |
+| `wowfish listen [--record WAV]` | Ask which window, then meter its app's audio and print bites as they are heard. macOS listens to BlackHole instead: `--list` shows the input devices, `--device D` picks one |
 | `wowfish verify-bite WAV [--save]` | Score a recording against every splash clip and pick the bite |
 | `wowfish config` | Create the config file if needed and print the resolved settings |
 | `wowfish config --path` | Print only the config file location |
@@ -172,7 +177,7 @@ This bot looks at pixels and listens to sound, and it presses the keys to cast a
 1. **Cast**: It casts using your specified cast key. Each key press is simulated with a `key_hold_ms` timer.
 2. **Detect bobber**: WoW draws a gold gear sprite over the bobber when it is in interact
 range. If you do not see the gold gear sprite above the bobber, that means the bobber is out of range for the interact key to work, so the bot will recast. The bot will scan for the sprite using template matching from OpenCV, and it matches it against the game window with a masked, mean-subtracted template match. If it doesn't find it, it will recast until it does. 
-3. **Detect bite**: WoW plays one of its splash clips when a fish bites. The bot fingerprints the first 0.8 seconds of each as a log-mel spectrogram with the gain removed. If there's a match, the bot will simulate the interact key, and auto-loot should pick up your fish. After all that, the bot recasts.
+3. **Detect bite**: WoW plays one of its splash clips when a fish bites. The bot listens only to the process that owns the window you picked (and the processes it started), so music or a video elsewhere does not get in the way. The bot fingerprints the first 0.8 seconds of each as a log-mel spectrogram with the gain removed. If there's a match, the bot will simulate the interact key, and auto-loot should pick up your fish. After all that, the bot recasts.
 
 ## License
 
