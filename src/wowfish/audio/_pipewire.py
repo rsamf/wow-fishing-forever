@@ -40,6 +40,18 @@ def _run_pw_dump() -> str:
         raise AudioUnavailable(f"cannot run pw-dump (is PipeWire running?): {e}") from e
 
 
+def pipewire_available() -> tuple[bool, str]:
+    """Whether one application's audio can be captured here, and what is missing if not."""
+    for tool in (PW_RECORD, PW_DUMP[0]):
+        if shutil.which(tool) is None:
+            return False, f"{tool} not found; install PipeWire's command-line tools"
+    try:
+        _run_pw_dump()
+    except AudioUnavailable as e:
+        return False, str(e)
+    return True, f"PipeWire per-app capture ({PW_RECORD})"
+
+
 def list_app_streams(*, dump: Callable[[], str] | None = None) -> list[AppStream]:
     """Every application playback stream PipeWire knows about, in dump order."""
     text = (dump or _run_pw_dump)()

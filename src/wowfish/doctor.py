@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import os
 import platform
-import shutil
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 from wowfish import __version__, paths
-from wowfish.capture import find_window, linux_hyprland, macos
+from wowfish.capture import linux_hyprland, macos
 
 Level = Literal["ok", "warn", "fail"]
 
@@ -129,7 +128,7 @@ def probe_audio() -> ProbeResult:
 
 
 def probe_game_audio() -> ProbeResult:
-    from wowfish.audio import AudioUnavailable, devices
+    from wowfish.audio import devices
     from wowfish.config import ConfigError, load_config
 
     if macos():  # no per-application capture: the bot listens to the configured device
@@ -140,25 +139,23 @@ def probe_game_audio() -> ProbeResult:
         if audio.capture == "device":
             return ProbeResult("game audio", "ok", f"device {audio.device or '(default)'!r}")
         return ProbeResult("game audio", "warn", devices.MAC_NO_GAME_AUDIO)
-    w = find_window("World of Warcraft")
-    try:
-        return ProbeResult("game audio", "ok", devices.describe_game_audio(w.pid if w else None))
-    except AudioUnavailable as e:
-        return ProbeResult("game audio", "warn", str(e))
+    if sys.platform == "linux":
+        from wowfish.audio._pipewire import pipewire_available
 
-
-def probe_game_window() -> ProbeResult:
-    w = find_window("World of Warcraft")
-    if w is None:
-        return ProbeResult("game window", "warn", "not found; is the game running?")
-    detail = f"{w.title!r} {w.width}x{w.height} at +{w.left}+{w.top}"
-    if w.compositor:
-        from wowfish.capture._wayland import GRIM
-
-        detail += f" (native Wayland on {w.compositor}, scale {w.scale:g})"
-        if shutil.which(GRIM) is None:
-            return ProbeResult("game window", "fail", f"{detail}; install grim to capture it")
-    return ProbeResult("game window", "ok", detail)
+        ok, detail = pipewire_available()
+        return ProbeResult("game audio", "ok" if ok else "warn", detail)
+    if sys.platform == "win32":
+        build = sys.getwindowsversion().build
+        if build >= 19041:
+            return ProbeResult(
+                "game audio", "ok", f"WASAPI process loopback (Windows build {build})"
+            )
+        return ProbeResult(
+            "game audio",
+            "warn",
+            "per-app audio needs Windows 10 version 2004 (build 19041) or newer",
+        )
+    return ProbeResult("game audio", "warn", "no game audio capture on this platform")
 
 
 def _xtest_available() -> tuple[bool, str]:
@@ -185,19 +182,20 @@ def probe_input() -> ProbeResult:
     if macos():
         ok, detail = _accessibility_available()
         return ProbeResult("input", "ok" if ok else "warn", detail)
-    w = find_window("World of Warcraft") if linux_hyprland() else None
-    if (w is not None and w.compositor) or (linux_hyprland() and not os.environ.get("DISPLAY")):
-        ok, detail = _virtual_keyboard_available()
-        return ProbeResult("input", "ok" if ok else "fail", detail)
-    if sys.platform == "linux" and os.environ.get("DISPLAY"):
-        ok, detail = _xtest_available()
-        return ProbeResult("input", "ok" if ok else "fail", detail)
-    return ProbeResult("input", "warn", "key presses not supported yet on this platform")
+    x11 = sys.platform == "linux" and bool(os.environ.get("DISPLAY"))
+    checks: list[tuple[bool, str]] = []
+    if linux_hyprland():  # a native Wayland game takes the virtual keyboard, an Xwayland one XTest
+        checks.append(_virtual_keyboard_available())
+    if x11:
+        checks.append(_xtest_available())
+    if not checks:
+        return ProbeResult("input", "warn", "key presses not supported yet on this platform")
+    ok = all(c[0] for c in checks)
+    return ProbeResult("input", "ok" if ok else "fail", "; ".join(c[1] for c in checks))
 
 
 def probe_calibration() -> ProbeResult:
     from wowfish.config import ConfigError, load_config
-    from wowfish.vision.matcher import MIN_TEMPLATE_PX
 
     hint = (
         "run `wowfish calibrate --save` on a screenshot showing the gear icon (or the GUI's Setup)"
@@ -209,18 +207,7 @@ def probe_calibration() -> ProbeResult:
     size = cfg.vision.icon_size_px
     if size <= 0:
         return ProbeResult("calibration", "warn", f"icon not calibrated; {hint}")
-    w = find_window("World of Warcraft")
-    if w is None:
-        return ProbeResult("calibration", "warn", f"{size} px (no game window to check it against)")
-    px = round(size * min(1.0, cfg.vision.match_width / w.width))
-    if px < MIN_TEMPLATE_PX:
-        return ProbeResult(
-            "calibration",
-            "fail",
-            f"{size} px is {px} px after downscaling this {w.width}-wide window "
-            f"(minimum {MIN_TEMPLATE_PX}); {hint}",
-        )
-    return ProbeResult("calibration", "ok", f"{size} px ({px} px in the matcher)")
+    return ProbeResult("calibration", "ok", f"{size} px")
 
 
 def probe_config() -> ProbeResult:
@@ -241,9 +228,8 @@ def default_probes() -> list[Probe]:
         probe_system,
         probe_display,
         probe_opencv,
-        probe_audio,
+        *([probe_audio] if macos() else []),
         probe_game_audio,
-        probe_game_window,
         probe_input,
         probe_calibration,
         probe_config,
