@@ -42,17 +42,18 @@ class FishPage:
         self.next = tb.Label(f, text="", font=("TkDefaultFont", 11), wraplength=860, justify="left")
         self.next.pack(anchor="w", pady=(2, 0))
         self.stats = tb.Label(f, text=presenter.stats)
-        self.stats.pack(anchor="w", pady=(2, 2))
-        tb.Label(
-            f,
-            text="Do not move or zoom the camera once the gear icon is detected.",
-            bootstyle="warning",
-        ).pack(anchor="w", pady=(0, 8))
+        self.stats.pack(anchor="w", pady=(2, 8))
 
         mid = tb.Frame(f)
         mid.pack(fill="both", expand=True)
-        self.image = tb.Label(mid, text="no icon seen yet", anchor="center", width=60)
-        self.image.pack(side="left", anchor="n")
+        left = tb.Frame(mid)
+        left.pack(side="left", anchor="n")
+        self.image = tb.Label(left, text="no icon seen yet", anchor="center", width=60)
+        self.image.pack(anchor="n")
+        # shown under the image once there is one: an image means the gear icon was detected
+        self.camera_note = tb.Label(
+            left, text="Do not move or zoom the camera", bootstyle="warning"
+        )
         self._photo = None
         right = tb.Frame(mid)
         right.pack(side="left", fill="both", expand=True, padx=(10, 0))
@@ -91,6 +92,8 @@ class FishPage:
             self._last_png = view.thumbnail_png
             self._photo = image.photo_from_png(view.thumbnail_png)
             self.image.configure(image=self._photo, text="")
+            if not self.camera_note.winfo_ismapped():
+                self.camera_note.pack(anchor="w", pady=(4, 0))
         self.graph.show(view.trace, self.p.cfg.run.cast_timeout_s)
         if view.new_lines:
             self.log.configure(state="normal")
