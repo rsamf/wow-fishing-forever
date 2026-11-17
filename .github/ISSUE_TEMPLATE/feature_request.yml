@@ -10,9 +10,7 @@ body:
       options:
         - label: "I searched the open and closed issues, and this has not been asked for"
           required: true
-        - label: "This is about fishing with wowfish (not another profession or another kind of automation)"
-          required: true
-        - label: "It works by looking at the screen, listening to the game and pressing keys (wowfish does not read memory, inject code, or use an addon)"
+        - label: "I understand that it works by looking at the screen, listening to the game and pressing keys (wowfish does not read memory, inject code, or use an addon)"
           required: true
   - type: textarea
     id: problem
