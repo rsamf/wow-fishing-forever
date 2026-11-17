@@ -613,7 +613,7 @@ def build_engine(
     """
     from wowfish.audio._recording import RecordingSource
     from wowfish.audio.detector import detector_for
-    from wowfish.audio.devices import open_capture
+    from wowfish.audio.devices import open_game_audio
     from wowfish.input import get_input_device
     from wowfish.vision.matcher import MIN_TEMPLATE_PX, IconMatcher
     from wowfish.vision.template import load_icon_templates, template_for_size
@@ -651,9 +651,7 @@ def build_engine(
         save_config(replace(current, vision=vision))
 
     detector = detector_for(cfg.audio)
-    audio: Any = ThreadedSource(
-        open_capture(cfg.audio.selector, pid=window.pid, title=window.title)
-    )
+    audio: Any = ThreadedSource(open_game_audio(window, cfg.audio.device))
     if record_audio is not None:
         audio = RecordingSource(audio, record_audio)
     return FishingEngine(

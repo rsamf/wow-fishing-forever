@@ -89,21 +89,33 @@ class SetupPage:
         audio = tb.Labelframe(f, text="Audio (what the bot hears) and bite check", padding=8)
         audio.pack(fill="x", pady=4)
         self.devices = presenter.audio_devices()
-        names = [d.name for d in self.devices]
-        self.device = tb.Combobox(audio, values=names, state="readonly", width=48)
-        current = presenter.cfg.audio.device
-        pick = next(
-            (i for i, d in enumerate(self.devices) if current and current in (d.id, d.name)), None
-        )
-        if pick is None:
-            default = presenter.default_device()
-            pick = self.devices.index(default) if default in self.devices else None
-        if pick is not None:
-            self.device.current(pick)
-        self.device.grid(row=0, column=0, columnspan=3, sticky="w")
-        tb.Button(
-            audio, text="Use this and listen", command=self._save_device, bootstyle="secondary"
-        ).grid(row=0, column=3, padx=6)
+        self._heard: Any = None  # the window the meter is on (Linux, Windows)
+        self._listen_label = "Listen" if presenter.audio_follows_window else "Use this and listen"
+        if presenter.audio_follows_window:
+            self.device = None
+            tb.Button(audio, text="Listen", command=self._listen, bootstyle="secondary").grid(
+                row=0, column=0, sticky="w"
+            )
+            tb.Label(audio, text="The bot hears only the app of the game window.").grid(
+                row=0, column=1, columnspan=3, sticky="w", padx=6
+            )
+        else:  # macOS: an input device carries the game's sound
+            names = [d.name for d in self.devices]
+            self.device = tb.Combobox(audio, values=names, state="readonly", width=48)
+            current = presenter.cfg.audio.device
+            pick = next(
+                (i for i, d in enumerate(self.devices) if current and current in (d.id, d.name)),
+                None,
+            )
+            if pick is None:
+                default = presenter.default_device()
+                pick = self.devices.index(default) if default in self.devices else None
+            if pick is not None:
+                self.device.current(pick)
+            self.device.grid(row=0, column=0, columnspan=3, sticky="w")
+            tb.Button(
+                audio, text="Use this and listen", command=self._save_device, bootstyle="secondary"
+            ).grid(row=0, column=3, padx=6)
         tb.Label(audio, text="Level").grid(row=1, column=0, sticky="w", pady=(8, 0))
         self.meter = tb.Progressbar(audio, maximum=100, value=0, bootstyle="info", length=300)
         self.meter.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 0))
@@ -172,6 +184,8 @@ class SetupPage:
         self.limit_note.configure(text=f"saved; used from the next Start{then}")
 
     def _selected_device(self) -> str | None:
+        if self.device is None:
+            return None
         i = self.device.current()
         return self.devices[i].id if 0 <= i < len(self.devices) else None
 
@@ -180,14 +194,40 @@ class SetupPage:
         if sel is not None:
             self.p.save_audio_device(sel)
             self._meter_error = ""
-            self.p.start_meter(sel)
+            self.p.start_meter(device=sel)
+
+    def _guess_window(self) -> Any:
+        from wowfish.capture import GAME_TITLE, find_window
+
+        return find_window(GAME_TITLE)  # until the picker dialog replaces this guess
+
+    def _listen(self) -> None:
+        window = self._guess_window()
+        if window is None:
+            self._meter_error = "no window to listen to"
+            return
+        self._listen_to(window)
+
+    def _listen_to(self, window: Any) -> None:
+        self._heard = window
+        self._meter_error = ""
+        self.p.start_meter(window=window)
 
     def _verify(self) -> None:
+        window = None
+        if self.p.audio_follows_window:
+            window = self._guess_window()
+            if window is None:
+                self.verify_note.configure(text="no window to listen to")
+                return
+        self._verify_with(window)
+
+    def _verify_with(self, window: Any) -> None:
         self._meter_was_on = self.p.meter_running
         self.p.stop_meter()  # the recording shows its own level on the meter
         self.verify_button.configure(state="disabled")
         self.verify_note.configure(text="Starting the recording...")
-        self.p.record_and_verify(60.0, self._selected_device())
+        self.p.record_and_verify(60.0, window=window, device=self._selected_device())
 
     def _calibrate(self) -> None:
         self.cal_button.configure(state="disabled")
@@ -214,13 +254,14 @@ class SetupPage:
         self.meter.configure(value=pct)
         if not view.listening:
             self.level_text.configure(
-                text=self._meter_error or "not listening (press Use this and listen)"
+                text=self._meter_error or f"not listening (press {self._listen_label})"
             )
         else:
             level = "silent" if view.level_dbfs <= -60 else f"{view.level_dbfs:5.1f} dBFS"
             best = max(view.last_scores.values(), default=None)
             score = f"   bite score {best:.2f}" if best is not None and best > -1.0 else ""
-            self.level_text.configure(text=level + score)
+            heard = f"listening to {self._heard.title}: " if self._heard is not None else ""
+            self.level_text.configure(text=heard + level + score)
         if view.verify_status:
             self.verify_note.configure(text=view.verify_status)
         if view.calibrate_status:
@@ -263,4 +304,4 @@ class SetupPage:
         self.verify_button.configure(state="normal")
         if self._meter_was_on:
             self._meter_was_on = False
-            self.p.start_meter(self._selected_device())
+            self.p.start_meter(window=self._heard, device=self._selected_device())

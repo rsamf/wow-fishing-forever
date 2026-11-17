@@ -25,7 +25,7 @@ from typer.testing import CliRunner
 
 from wowfish import capture
 from wowfish.assets import CLIP_NAMES, ICON_SIZES, default_config_path
-from wowfish.audio import AudioChunk, devices
+from wowfish.audio import AudioChunk, AudioUnavailable, _pipewire, devices
 from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
@@ -119,6 +119,9 @@ def test_older_config_gains_new_settings_at_launch(tmp_path, monkeypatch):
         "icon_size_px = 53\n"
         "legacy_key = 1\n"
         "\n"
+        "[audio]\n"
+        'capture = "device"\n'
+        "\n"
         "[game]\n"
         "# Keybind for the Fishing ability on your action bar.\n"
         'cast_key = "7"'  # no newline at the end
@@ -129,6 +132,7 @@ def test_older_config_gains_new_settings_at_launch(tmp_path, monkeypatch):
     expected = tomllib.loads(default_config_path().read_text())
     expected["game"]["cast_key"] = "7"
     expected["vision"].update(icon_size_px=53, legacy_key=1)
+    expected["audio"]["capture"] = "device"  # a retired setting: kept in the file, ignored
     assert tomllib.loads(merged) == expected
     for line in old.splitlines():
         assert line in merged.splitlines(), line
@@ -447,9 +451,9 @@ def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
     """macOS has no loopback capture, so the bot listens to an input device: BlackHole is listed
     first and is the default, under its name (CoreAudio ids change across reboots), and an exact
     id or name wins over one it is part of. It records with CoreAudio's own buffer size, since a
-    device such as BlackHole refuses the 1024 frames used elsewhere. The GUI offers no "game
-    only" choice there, and Start names the missing permission and the audio setting until both
-    are fixed."""
+    device such as BlackHole refuses the 1024 frames used elsewhere. An empty
+    setting means the first virtual device and never the microphone: with none installed, opening
+    fails and Start says to install BlackHole, while a device named outright is used as given."""
     asked: list[dict] = []
 
     def mic(id_, name):
@@ -472,12 +476,43 @@ def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
 
     monkeypatch.setattr(_quartz, "screen_capture_available", lambda request: (True, ""))
     monkeypatch.setattr(input_quartz, "accessibility_available", lambda request: (False, "AX off"))
+    assert devices.open_loopback("").mic is mics[1]  # empty: the first virtual device
     p = Presenter(find_window=lambda _: None)
     assert [d.id for d in p.audio_devices()] == [m.name for m in mics[1:] + mics[:1]]
-    assert p.prerequisites()[:2] == ["AX off", devices.MAC_NO_GAME_AUDIO]
-    p.save_audio_device(p.default_device().id)
-    assert (p.cfg.audio.capture, p.cfg.audio.device) == ("device", "BlackHole 16ch")
+    assert p.prerequisites()[0] == "AX off"
     assert devices.MAC_NO_GAME_AUDIO not in p.prerequisites()
+    p.save_audio_device("BlackHole 2ch")
+    assert p.cfg.audio.device == "BlackHole 2ch"
+    p.save_audio_device("")
+    mics[:] = mics[:1]  # no BlackHole installed
+    with pytest.raises(AudioUnavailable, match="install BlackHole"):
+        devices.open_loopback("")
+    assert devices.MAC_NO_GAME_AUDIO in p.prerequisites()
+    assert devices.open_loopback("MacBook").mic is mics[0]  # named: used as given
+
+
+def test_audio_follows_the_picked_window(monkeypatch):
+    """Linux hears the stream of the picked window's process, or of a process it started (the
+    way Windows captures a process tree), and never a stream that merely has the game's name; a
+    silent window, or one whose process is unknown, gets an error naming it, on Windows too."""
+    S = _pipewire.AppStream
+    streams = [S(1, "World of Warcraft", 500, "wine64-preloader"), S(2, "Firefox", 600, "firefox"),
+               S(3, "WEBRTC VoiceEngine", 801, "Discord")]  # fmt: skip
+    parents = {801: 800, 800: 700, 700: 1, 600: 1, 500: 1}.get
+    assert _pipewire.pick_stream(streams, 600, parents).serial == 2
+    assert _pipewire.pick_stream(streams, 700, parents).serial == 3  # sound from a child
+    assert _pipewire.pick_stream(streams, 400, parents) is None  # not by name
+    assert _pipewire.pick_stream([S(4, "x", 901, "x")], 900, {901: 902, 902: 901}.get) is None
+
+    window = WindowRef("Mundo de Warcraft", 400, 0, 0, 10, 10, handle=1)
+    monkeypatch.setattr(_pipewire, "_parent_pid", lambda pid: None)  # never read the real /proc
+    monkeypatch.setattr(_pipewire.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(_pipewire, "list_app_streams", lambda dump=None: streams)
+    for platform, w in (("linux", window), ("linux", replace(window, pid=None)),
+                        ("win32", replace(window, pid=None))):  # fmt: skip
+        monkeypatch.setattr(sys, "platform", platform)
+        with pytest.raises(AudioUnavailable, match="Mundo de Warcraft"):
+            devices.open_game_audio(w)
 
 
 class _Pond:

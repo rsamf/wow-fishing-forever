@@ -8,21 +8,24 @@ from typing import Annotated
 import numpy as np
 import typer
 
-from wowfish.capture import find_window
-from wowfish.commands._common import fail, load_config_or_fail
+from wowfish.commands._common import (
+    fail,
+    load_config_or_fail,
+    pick_window_or_fail,
+    preflight_or_fail,
+)
 
 BLOCK = 2205  # 100 ms at 22050 Hz
 
 
 def listen(
-    list_devices: bool = typer.Option(False, "--list", help="List loopback devices and exit."),
+    list_devices: bool = typer.Option(False, "--list", help="macOS: list input devices and exit."),
     device: str | None = typer.Option(
         None,
         "--device",
-        help='Loopback device id or name substring ("" = default output monitor); '
-        "default: the config's capture setting, normally the game's own audio.",
+        help="macOS only: input device name or part of it (default: audio.device, else "
+        "BlackHole). Linux and Windows hear the app of the window you pick.",
     ),
-    title: str = typer.Option("World of Warcraft", "--title", help="Game window title."),
     source_file: Annotated[
         Path | None,
         typer.Option(
@@ -46,6 +49,12 @@ def listen(
     from wowfish.audio.wav import write_wav
 
     if list_devices:
+        if devices.audio_follows_window():
+            typer.echo(
+                "Linux and Windows hear the app of the window you pick; "
+                "there are no devices to list"
+            )
+            return
         try:
             found = devices.list_loopback_devices()
         except AudioUnavailable as e:
@@ -64,15 +73,19 @@ def listen(
     if source_file is not None:
         source = WavFileSource(source_file)
     else:
-        selector = device if device is not None else cfg.audio.selector
-        window = find_window(title) if selector == devices.GAME else None
+        window = None
+        if devices.audio_follows_window():
+            if device is not None:
+                fail("--device is for macOS; Linux and Windows hear the app of the window you pick")
+            preflight_or_fail()
+            window = pick_window_or_fail()
         try:
-            source = devices.open_capture(selector, pid=window.pid if window else None, title=title)
+            source = devices.open_game_audio(window, cfg.audio.device if device is None else device)
         except AudioUnavailable as e:
             fail(str(e))
         name = getattr(source, "name", type(source).__name__)
-        if selector == devices.GAME:
-            typer.echo(f"listening to {title} only ({name})", err=True)
+        if window is not None:
+            typer.echo(f"listening to {window.title} only ({name})", err=True)
         else:
             typer.echo(f"listening on {name}", err=True)
 

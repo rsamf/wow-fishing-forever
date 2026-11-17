@@ -21,6 +21,10 @@ from wowfish.input.keys import is_supported_key
 _LINE_RE = re.compile(r"\(at line (\d+), column \d+\)")
 
 
+# Settings from older releases: still accepted in a config file, and ignored without a warning.
+RETIRED_KEYS = {("audio", "capture")}
+
+
 class ConfigError(Exception):
     def __init__(self, path: Path, message: str, line: int | None = None) -> None:
         self.path = path
@@ -55,15 +59,9 @@ class VisionConfig:
 
 @dataclass(frozen=True)
 class AudioConfig:
-    capture: str = "game"  # "game": the game's own audio stream; "device": the loopback `device`
-    device: str = ""
+    device: str = ""  # macOS only: the input device that carries the game ("" = BlackHole)
     bite_threshold: float = 0.66
     refractory_s: float = 3.0
-
-    @property
-    def selector(self) -> str:
-        """What to open: "game", or the loopback device selector ("" = default output monitor)."""
-        return "game" if self.capture == "game" else self.device
 
 
 @dataclass(frozen=True)
@@ -229,6 +227,8 @@ def _build_section(
     known = {f.name: f for f in fields(cls)}
     kwargs: dict[str, Any] = {}
     for key, value in table.items():
+        if (section, key) in RETIRED_KEYS:
+            continue
         if key not in known:
             warnings.append(f"unknown key {section}.{key} ignored")
             continue
@@ -266,7 +266,6 @@ def _validate(path: Path, cfg: Config) -> None:
     check(v.match_width >= 320, "vision.match_width", "must be at least 320")
     check(v.icon_size_px >= 0, "vision.icon_size_px", "must be 0 or positive")
     check(v.icon_native_size >= 0, "vision.icon_native_size", "must be 0 or positive")
-    check(a.capture in ("game", "device"), "audio.capture", 'must be "game" or "device"')
     check(0.0 < a.bite_threshold <= 1.0, "audio.bite_threshold", "must be in (0, 1]")
     check(a.refractory_s >= 0.0, "audio.refractory_s", "must be 0 or positive")
     r = cfg.run

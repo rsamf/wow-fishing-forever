@@ -128,17 +128,17 @@ def probe_audio() -> ProbeResult:
 
 
 def probe_game_audio() -> ProbeResult:
-    from wowfish.audio import devices
+    from wowfish.audio import AudioUnavailable, devices
     from wowfish.config import ConfigError, load_config
 
     if macos():  # no per-application capture: the bot listens to the configured device
         try:
-            audio = load_config()[0].audio
+            device = load_config()[0].audio.device
+            return ProbeResult("game audio", "ok", f"device {devices.mac_device_name(device)!r}")
         except ConfigError as e:
             return ProbeResult("game audio", "fail", str(e))
-        if audio.capture == "device":
-            return ProbeResult("game audio", "ok", f"device {audio.device or '(default)'!r}")
-        return ProbeResult("game audio", "warn", devices.MAC_NO_GAME_AUDIO)
+        except AudioUnavailable as e:
+            return ProbeResult("game audio", "warn", str(e))
     if sys.platform == "linux":
         from wowfish.audio._pipewire import pipewire_available
 

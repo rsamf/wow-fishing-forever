@@ -4,7 +4,6 @@ engine thread and the setup workers (meter, calibration grab, bite recording). N
 from __future__ import annotations
 
 import queue
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -162,22 +161,20 @@ class Presenter:
         *,
         build_engine: Callable[..., Any] | None = None,
         list_devices: Callable[[], list[Any]] | None = None,
-        open_capture: Callable[..., Any] | None = None,
+        open_game_audio: Callable[..., Any] | None = None,
         find_window: Callable[..., Any] | None = None,
         get_capturer: Callable[..., Any] | None = None,
     ) -> None:
-        from wowfish.audio.devices import GAME, GAME_CHOICE, LoopbackDevice, list_loopback_devices
-        from wowfish.audio.devices import open_capture as real_open
+        from wowfish.audio.devices import audio_follows_window, list_loopback_devices
+        from wowfish.audio.devices import open_game_audio as real_open
         from wowfish.capture import find_window as real_find
         from wowfish.capture import get_capturer as real_capturer
         from wowfish.engine.engine import build_engine as real_build
 
         self._build_engine = build_engine or real_build
         self._list_devices = list_devices or list_loopback_devices
-        self._open_capture = open_capture or real_open
-        self._game = GAME
-        self._game_choice = GAME_CHOICE
-        self._device_type = LoopbackDevice
+        self._open_game_audio = open_game_audio or real_open
+        self.audio_follows_window: bool = audio_follows_window()
         self._find_window = find_window or real_find
         self._get_capturer = get_capturer or real_capturer
 
@@ -227,34 +224,28 @@ class Presenter:
             self.reload()
 
     def audio_devices(self) -> list[Any]:
-        """The game's own audio first (default), then the loopback monitors.
-
-        macOS cannot capture one app, so there it is the input devices, BlackHole first (default).
+        """macOS cannot capture one app, so there it is the input devices, BlackHole first
+        (default). Elsewhere the bot hears the picked window's app and there is nothing to choose.
         """
+        if self.audio_follows_window:
+            return []
         try:
-            monitors = self._list_devices()
+            return list(self._list_devices())
         except AudioUnavailable:
-            monitors = []
-        if sys.platform == "darwin":
-            return list(monitors)
-        return [self._game_choice] + [self._device_type(d.id, d.name, False) for d in monitors]
+            return []
 
     def default_device(self) -> Any | None:
         found = self.audio_devices()
         return next((d for d in found if d.is_default), found[0] if found else None)
 
-    def save_audio_device(self, selector: str) -> None:
-        if selector == self._game:
-            audio = replace(self.cfg.audio, capture="game")
-        else:
-            audio = replace(self.cfg.audio, capture="device", device=selector)
-        save_config(replace(self.cfg, audio=audio))
+    def save_audio_device(self, device: str) -> None:
+        """macOS: the input device the game's sound is routed into ("" = BlackHole or the like)."""
+        save_config(replace(self.cfg, audio=replace(self.cfg.audio, device=device)))
         self.reload()
 
-    def _open_audio(self, selector: str | None) -> Any:
-        selector = selector if selector is not None else self.cfg.audio.selector
-        window = self._find_window(GAME_TITLE) if selector == self._game else None
-        return self._open_capture(selector, pid=window.pid if window else None, title=GAME_TITLE)
+    def _open_audio(self, window: Any, device: str | None) -> Any:
+        """The picked window's app; on macOS the input device (the saved one when None)."""
+        return self._open_game_audio(window, self.cfg.audio.device if device is None else device)
 
     def save_calibration(self) -> None:
         if self.last_calibration is None:
@@ -289,7 +280,7 @@ class Presenter:
         `request` also asks macOS for missing permissions, which shows its prompt: Start passes
         it, the check when the window opens does not.
         """
-        from wowfish.audio.devices import MAC_NO_GAME_AUDIO
+        from wowfish.audio.devices import mac_device_name
         from wowfish.engine.engine import missing_permissions, unsupported_platform
         from wowfish.vision.matcher import MIN_TEMPLATE_PX
 
@@ -298,8 +289,11 @@ class Presenter:
         if problem:
             reasons.append(problem)
         reasons += missing_permissions(request)
-        if sys.platform == "darwin" and self.cfg.audio.capture == self._game:
-            reasons.append(MAC_NO_GAME_AUDIO)
+        if not self.audio_follows_window:
+            try:
+                mac_device_name(self.cfg.audio.device)
+            except AudioUnavailable as e:
+                reasons.append(str(e))
         window = self._find_window("World of Warcraft")
         if window is None and not problem:
             reasons.append("World of Warcraft window not found; is the game running?")
@@ -308,13 +302,6 @@ class Presenter:
             px = round(size * min(1.0, self.cfg.vision.match_width / window.width))
             if px < MIN_TEMPLATE_PX:
                 reasons.append("the calibrated icon is too small for this window; recalibrate")
-        if not self.audio_devices():
-            mac = sys.platform == "darwin"
-            reasons.append(
-                "no audio input device; install BlackHole"
-                if mac
-                else "no loopback audio device found"
-            )
         return reasons
 
     # -- the bot ----------------------------------------------------------------------------
@@ -489,12 +476,17 @@ class Presenter:
             self.calibrate_status = ""  # before the result, so the result's words stay up
         self._results.put(result)
 
-    def record_and_verify(self, seconds: float = 60.0, selector: str | None = None) -> None:
+    def record_and_verify(
+        self, seconds: float = 60.0, window: Any = None, device: str | None = None
+    ) -> None:
         threading.Thread(
-            target=self._verify_worker, args=(seconds, selector), name="wowfish-verify", daemon=True
+            target=self._verify_worker,
+            args=(seconds, window, device),
+            name="wowfish-verify",
+            daemon=True,
         ).start()
 
-    def _verify_worker(self, seconds: float, selector: str | None) -> None:
+    def _verify_worker(self, seconds: float, window: Any, device: str | None) -> None:
         from wowfish.audio.clips import build_fingerprints
         from wowfish.audio.features import DEFAULT_MEL
         from wowfish.audio.verify import bite_report, score_recording
@@ -502,7 +494,7 @@ class Presenter:
         result: object
         try:
             self.verify_status = "Opening the game's audio..."
-            source = self._open_audio(selector)
+            source = self._open_audio(window, device)
             chunks: list[np.ndarray] = []
             frames = 0
             with source:
@@ -549,12 +541,12 @@ class Presenter:
     def meter_running(self) -> bool:
         return self._meter is not None and self._meter.thread.is_alive()
 
-    def start_meter(self, selector: str | None = None) -> None:
+    def start_meter(self, window: Any = None, device: str | None = None) -> None:
         from wowfish.audio.detector import detector_for
 
         self.stop_meter()
         try:
-            source = self._open_audio(selector)
+            source = self._open_audio(window, device)
         except Exception as e:
             self._results.put(WorkerFailed("open the audio device", str(e)))
             return

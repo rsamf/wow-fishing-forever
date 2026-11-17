@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from wowfish.audio import AudioUnavailable
+from wowfish.capture import WindowRef
 
 PW_DUMP = ["pw-dump"]
 PW_RECORD = "pw-record"
@@ -76,15 +77,36 @@ def list_app_streams(*, dump: Callable[[], str] | None = None) -> list[AppStream
     return out
 
 
-def pick_stream(streams: Sequence[AppStream], *, pid: int | None, name: str) -> AppStream | None:
-    """The stream of process `pid` if there is one, else the first whose name contains `name`."""
-    if pid is not None:
-        for s in streams:
-            if s.pid == pid:
-                return s
-    wanted = name.lower()
+def _parent_pid(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as f:
+            return int(f.read().rsplit(")", 1)[1].split()[1])  # after "(comm)": state, ppid
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _descends_from(pid: int, ancestor: int, parent_of: Callable[[int], int | None]) -> bool:
+    seen: set[int] = set()
+    current: int | None = pid
+    while current is not None and current > 1 and current not in seen and len(seen) < 64:
+        seen.add(current)
+        current = parent_of(current)
+        if current == ancestor:
+            return True
+    return False
+
+
+def pick_stream(
+    streams: Sequence[AppStream], pid: int, parent_of: Callable[[int], int | None] | None = None
+) -> AppStream | None:
+    """The stream of process `pid`, else of a process it started (as Windows captures a process
+    tree). Never by name: the user picked the window, and only its app is heard."""
     for s in streams:
-        if wanted in s.name.lower():
+        if s.pid == pid:
+            return s
+    parent_of = parent_of or _parent_pid
+    for s in streams:
+        if s.pid is not None and _descends_from(s.pid, pid, parent_of):
             return s
     return None
 
@@ -157,32 +179,28 @@ class PipewireAppSource:
 
 
 def open_app_stream(
+    window: WindowRef,
     *,
-    pid: int | None,
-    name: str,
     sample_rate: int = 22050,
     blocksize: int = 1024,
     dump: Callable[[], str] | None = None,
 ) -> PipewireAppSource:
+    """Capture the audio of the app that owns `window`."""
     if shutil.which(PW_RECORD) is None:
         raise AudioUnavailable(
             "pw-record not found; install PipeWire's command-line tools "
             "(package pipewire-bin, pipewire-utils, or pipewire-tools)"
         )
-    stream = pick_stream(list_app_streams(dump=dump), pid=pid, name=name)
+    if window.pid is None:
+        raise AudioUnavailable(
+            f"cannot tell which process owns {window.title!r}; pick another window"
+        )
+    stream = pick_stream(list_app_streams(dump=dump), window.pid)
     if stream is None:
         raise AudioUnavailable(
-            f"no audio stream from {name!r}; is the game running with sound on? "
-            '(audio.capture = "device" listens to the output monitor instead)'
+            f"no sound from {window.title!r} (pid {window.pid}); is its sound on? "
+            "Make it play a sound and try again"
         )
     return PipewireAppSource(
         stream.serial, stream.name, sample_rate=sample_rate, blocksize=blocksize
     )
-
-
-def describe_stream(*, pid: int | None, name: str, dump: Callable[[], str] | None = None) -> str:
-    stream = pick_stream(list_app_streams(dump=dump), pid=pid, name=name)
-    if stream is None:
-        raise AudioUnavailable(f"no audio stream from {name!r}; is the game running with sound on?")
-    who = f"pid {stream.pid}" if stream.pid is not None else stream.binary
-    return f"PipeWire stream {stream.name!r} ({who}, serial {stream.serial})"

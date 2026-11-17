@@ -28,11 +28,10 @@ icon_threshold = 0.75
 match_width = 1920
 
 [audio]
-# "game": hear only the game's own audio stream (Linux PipeWire, Windows 10 2004+), so music or
-# videos in other applications cannot drown the splash. "device": hear the loopback `device`.
-capture = "game"
-# Loopback device id or name substring, used when capture = "device". Empty = monitor of the
-# default output.
+# The bot hears only the app of the game window you pick (Linux PipeWire, Windows 10 2004+), so
+# music or videos in other applications cannot drown the splash.
+# macOS only: name of the input device the game's sound is routed into. Empty = BlackHole (or
+# another virtual device). Linux and Windows ignore this.
 device = ""
 bite_threshold = 0.66
 # Ignore further bites for this many seconds after one fires.

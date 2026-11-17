@@ -289,8 +289,7 @@ class _ComLoopback:
                 byref(handler),
                 byref(op),
             ),
-            "ActivateAudioInterfaceAsync (per-process capture needs Windows 10 version 2004 "
-            'or later; set audio.capture = "device" to use the output monitor)',
+            "ActivateAudioInterfaceAsync (hearing one app needs Windows 10 version 2004 or later)",
         )
         if not done.wait(5.0):
             raise AudioUnavailable("ActivateAudioInterfaceAsync did not complete")

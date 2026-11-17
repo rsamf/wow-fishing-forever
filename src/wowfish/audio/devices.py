@@ -1,8 +1,9 @@
-"""What the bot can listen to: the game's own stream ("game") or a system loopback device.
+"""What the bot listens to: the app that owns the window the user picked.
 
-`soundcard` is imported lazily: CI has no audio. Per-application capture is in `_pipewire`
-(Linux) and `_wasapi` (Windows). macOS has neither per-application capture nor loopback, so there
-the "loopback devices" are input devices, and a virtual one such as BlackHole carries the game.
+Linux (`_pipewire`) and Windows (`_wasapi`) capture one application's audio by its process.
+macOS has neither per-application capture nor loopback, so there the bot listens to an input
+device, and a virtual one such as BlackHole carries the game. `soundcard` is imported lazily: CI
+has no audio.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from typing import Any
 
 from wowfish.audio import AudioUnavailable
 from wowfish.audio._soundcard import SoundcardSource
+from wowfish.capture import WindowRef
 
 
 @dataclass(frozen=True)
@@ -22,13 +24,16 @@ class LoopbackDevice:
     is_default: bool
 
 
-GAME = "game"
-GAME_CHOICE = LoopbackDevice(GAME, "World of Warcraft only (recommended)", True)
 MAC_VIRTUAL = ("blackhole", "loopback", "soundflower")  # macOS devices that carry system audio
 MAC_NO_GAME_AUDIO = (
-    "macOS cannot capture one app's audio: route the game's sound through BlackHole and pick it "
-    'on the Setup tab (or set audio.capture = "device" and audio.device = "BlackHole")'
+    "no BlackHole or other virtual audio device found; install BlackHole and route the game's "
+    "sound through it (see the README)"
 )
+
+
+def audio_follows_window() -> bool:
+    """Whether the game's audio is captured from the picked window's app (not on macOS)."""
+    return sys.platform != "darwin"
 
 
 def _soundcard() -> Any:
@@ -43,123 +48,70 @@ def _mac_virtual(mic: Any) -> bool:
     return any(v in str(mic.name).lower() for v in MAC_VIRTUAL)
 
 
-def _loopback_mics() -> tuple[list[Any], Any]:
+def _mac_inputs() -> list[Any]:
+    """Every macOS input device, BlackHole and the like first."""
     sc = _soundcard()
     try:
-        if sys.platform == "darwin":  # every input device, BlackHole and the like first
-            mics = sorted(sc.all_microphones(), key=lambda m: not _mac_virtual(m))
-        else:
-            mics = sc.all_microphones(include_loopback=True)
-            mics = [m for m in mics if getattr(m, "isloopback", False)]
+        return sorted(sc.all_microphones(), key=lambda m: not _mac_virtual(m))
     except Exception as e:
         raise AudioUnavailable(f"cannot list audio devices: {type(e).__name__}: {e}") from e
-    try:
-        speaker = sc.default_speaker()
-    except Exception:
-        speaker = None
-    return mics, speaker
-
-
-def _is_default(mic: Any, speaker: Any) -> bool:
-    if sys.platform == "darwin":
-        return _mac_virtual(mic)
-    if speaker is None:
-        return False
-    return str(speaker.id) in str(mic.id) or str(speaker.name) in str(mic.name)
-
-
-def _device_id(mic: Any) -> str:
-    # CoreAudio ids are small integers that change across reboots; the name is what stays put
-    return str(mic.name) if sys.platform == "darwin" else str(mic.id)
 
 
 def list_loopback_devices() -> list[LoopbackDevice]:
-    mics, speaker = _loopback_mics()
-    return [LoopbackDevice(_device_id(m), str(m.name), _is_default(m, speaker)) for m in mics]
+    """The macOS input devices; a virtual one is a default. CoreAudio ids are small integers that
+    change across reboots, so the name is the id."""
+    return [LoopbackDevice(str(m.name), str(m.name), _mac_virtual(m)) for m in _mac_inputs()]
+
+
+def _mac_input(selector: str) -> Any:
+    mics = _mac_inputs()
+    if not selector:
+        mic = next((m for m in mics if _mac_virtual(m)), None)
+        if mic is None:  # never the microphone: it would hear the room, not the game
+            raise AudioUnavailable(MAC_NO_GAME_AUDIO)
+        return mic
+    wanted = selector.lower()
+    mic = next((m for m in mics if selector in (str(m.id), str(m.name))), None) or next(
+        (m for m in mics if selector in str(m.id) or wanted in str(m.name).lower()), None
+    )
+    if mic is None:
+        raise AudioUnavailable(f"no input device matches {selector!r}; run `wowfish listen --list`")
+    return mic
 
 
 def open_loopback(
     selector: str = "", *, sample_rate: int = 22050, blocksize: int = 1024
 ) -> SoundcardSource:
-    """Open by exact id or name, else by id substring or case-insensitive name substring.
-
-    An empty selector opens the monitor of the default output (on macOS, BlackHole or the like).
-    """
-    mics, speaker = _loopback_mics()
-    if not mics:
-        raise AudioUnavailable(
-            "no loopback devices found (macOS needs a virtual device such as BlackHole)"
-        )
-    if selector:
-        wanted = selector.lower()
-        mic = next((m for m in mics if selector in (str(m.id), str(m.name))), None) or next(
-            (m for m in mics if selector in str(m.id) or wanted in str(m.name).lower()), None
-        )
-        if mic is None:
-            raise AudioUnavailable(
-                f"no loopback device matches {selector!r}; run `wowfish listen --list`"
-            )
-    else:
-        mic = next((m for m in mics if _is_default(m, speaker)), mics[0])
-    return SoundcardSource(mic, sample_rate, blocksize)
+    """Open a macOS input device by exact id or name, else by id substring or case-insensitive
+    name substring. An empty selector opens the first virtual device (BlackHole or the like)."""
+    return SoundcardSource(_mac_input(selector), sample_rate, blocksize)
 
 
-def capture_choices(title: str = "World of Warcraft") -> list[LoopbackDevice]:
-    """The game's own audio first (the default), then every loopback monitor (never default)."""
-    try:
-        monitors = list_loopback_devices()
-    except AudioUnavailable:
-        monitors = []
-    return [GAME_CHOICE] + [LoopbackDevice(d.id, d.name, False) for d in monitors]
+def mac_device_name(selector: str = "") -> str:
+    """The name of the device `open_loopback(selector)` would open; raises the same errors."""
+    return str(_mac_input(selector).name)
 
 
-def _open_pipewire(pid: int | None, name: str, **kw: Any) -> Any:
-    from wowfish.audio._pipewire import open_app_stream
-
-    return open_app_stream(pid=pid, name=name, **kw)
-
-
-def _open_wasapi(pid: int, **kw: Any) -> Any:
-    from wowfish.audio._wasapi import ProcessLoopbackSource
-
-    return ProcessLoopbackSource(pid, **kw)
-
-
-def open_capture(
-    selector: str = GAME,
+def open_game_audio(
+    window: WindowRef | None,
+    device: str = "",
     *,
-    pid: int | None = None,
-    title: str = "World of Warcraft",
     sample_rate: int = 22050,
     blocksize: int = 1024,
 ) -> Any:
-    """Open what `selector` names: "game" for the game's own stream, else a loopback device.
-
-    For "game", `pid` is the game window's process (preferred) and `title` the fallback name.
-    """
-    if selector != GAME:
-        return open_loopback(selector, sample_rate=sample_rate, blocksize=blocksize)
+    """The audio of the app that owns `window`; on macOS, the input `device` instead."""
+    if not audio_follows_window():
+        return open_loopback(device, sample_rate=sample_rate, blocksize=blocksize)
+    if window is None:
+        raise AudioUnavailable("pick the game window first")
     if sys.platform == "linux":
-        return _open_pipewire(pid, title, sample_rate=sample_rate, blocksize=blocksize)
-    if sys.platform == "win32":
-        if pid is None:
-            raise AudioUnavailable(
-                f"no window titled {title!r}; the game must be running to capture its audio"
-            )
-        return _open_wasapi(pid, sample_rate=sample_rate, blocksize=blocksize)
-    raise AudioUnavailable(MAC_NO_GAME_AUDIO)
+        from wowfish.audio._pipewire import open_app_stream
 
+        return open_app_stream(window, sample_rate=sample_rate, blocksize=blocksize)
+    if window.pid is None:
+        raise AudioUnavailable(
+            f"cannot tell which process owns {window.title!r}; pick another window"
+        )
+    from wowfish.audio._wasapi import ProcessLoopbackSource
 
-def describe_game_audio(pid: int | None, title: str = "World of Warcraft") -> str:
-    """One line on how the game's audio would be captured here; AudioUnavailable when it cannot."""
-    if sys.platform == "linux":
-        from wowfish.audio._pipewire import describe_stream
-
-        return describe_stream(pid=pid, name=title)
-    if sys.platform == "win32":
-        if pid is None:
-            raise AudioUnavailable(f"no window titled {title!r}; is the game running?")
-        return f"WASAPI process loopback on pid {pid}"
-    raise AudioUnavailable(
-        'per-application capture is not available on macOS; set audio.capture = "device"'
-    )
+    return ProcessLoopbackSource(window.pid, sample_rate=sample_rate, blocksize=blocksize)
