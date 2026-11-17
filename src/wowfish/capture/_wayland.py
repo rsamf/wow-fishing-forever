@@ -104,6 +104,19 @@ def find_window_hyprland(title_substring: str) -> WindowRef | None:
     )
 
 
+def refresh_hyprland(
+    clients: Sequence[dict[str, Any]], monitors: Sequence[dict[str, Any]], window: WindowRef
+) -> WindowRef | None:
+    """The window's client as it is now, by address; None once Hyprland no longer lists it."""
+    for c in clients:
+        if c.get("xwayland") or int(str(c.get("address") or "0"), 16) != window.handle:
+            continue
+        if not c.get("mapped", True) or c.get("hidden"):
+            return window  # still there, just not shown
+        return _client_ref(c, _scales(monitors))
+    return None
+
+
 def list_windows_hyprland() -> list[WindowRef]:
     """The native Wayland windows; Xwayland ones are listed through X11, which can grab them."""
     found = hyprland_windows(hyprland_request("clients"), hyprland_request("monitors"))

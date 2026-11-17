@@ -27,8 +27,13 @@ from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
 from wowfish.capture import WindowRef, _quartz, _wayland, _x11
-from wowfish.capture._quartz import frontmost_pid, pick_quartz_window, quartz_windows
-from wowfish.capture._wayland import hyprland_windows, pick_hyprland_window
+from wowfish.capture._quartz import (
+    frontmost_pid,
+    pick_quartz_window,
+    quartz_windows,
+    refreshed_from_infos,
+)
+from wowfish.capture._wayland import hyprland_windows, pick_hyprland_window, refresh_hyprland
 from wowfish.capture.choices import order_choices
 from wowfish.cli import _setup_logging, app
 from wowfish.config import (
@@ -312,6 +317,12 @@ def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
     )  # fmt: skip
     assert (w.handle, w.compositor, w.scale) == (0x2A, "hyprland", 1.2)
     assert pick_hyprland_window(clients, monitors, "Hearthstone") is None
+    moved = [{**c, "at": [0, 0], "monitor": 2} if c["address"] == "0x2a" else c for c in clients]
+    r = refresh_hyprland(moved, monitors, w)
+    assert r is not None and (r.left, r.top, r.width, r.height, r.scale) == (0, 0, 6400, 3600, 2.0)
+    hidden = [{**c, "hidden": True, "mapped": False} for c in clients]
+    assert refresh_hyprland(hidden, monitors, w) == w  # still there, just not shown
+    assert refresh_hyprland([c for c in clients if c["address"] != "0x2a"], monitors, w) is None
 
     clients.append(client("0x5d", "World of Warcraft", [0, 0], [2560, 1440], 2, 7, xwayland=True))
     x = pick_hyprland_window(clients, monitors, "world of warcraft")
@@ -359,6 +370,9 @@ def test_macos_window_focus_and_keys(monkeypatch):
     assert [(r.handle, r.title) for r in quartz_windows(infos)] == [
         (2, "Terminal"), (3, "World of Warcraft"), (4, "World of Warcraft - Wowhead"),
     ]  # fmt: skip
+    assert refreshed_from_infos(infos[:2], w) is None
+    again = refreshed_from_infos([{**infos[2], "bounds": (10, 40, 1512, 949)}], w)
+    assert again is not None and (again.left, again.top, again.handle) == (10, 40, 3)
     hidden = pick_quartz_window([{**i, "name": None} for i in infos], "World of Warcraft")
     assert hidden is not None and (hidden.title, hidden.handle) == ("World of Warcraft", 3)
     assert pick_quartz_window(infos, "Hearthstone") is None

@@ -136,6 +136,41 @@ def find_window(title_substring: str = GAME_TITLE) -> WindowRef | None:
     return None
 
 
+def refresh_window(window: WindowRef) -> WindowRef | None:
+    """The same window where it is now, looked up by its id; None only once it no longer exists.
+
+    A window that cannot be measured right now (minimized, on another workspace), or a platform
+    that cannot tell, gives the ref back unchanged.
+    """
+    if window.handle is None:
+        return window
+    try:
+        if window.compositor == "hyprland":
+            from wowfish.capture import _wayland
+
+            return _wayland.refresh_hyprland(
+                _wayland.hyprland_request("clients"), _wayland.hyprland_request("monitors"), window
+            )
+        if window.compositor:
+            return window
+        if linux_x11():
+            from wowfish.capture._x11 import refresh_x11
+
+            return refresh_x11(window)
+        if sys.platform == "win32":
+            from wowfish.capture import _win32
+
+            return _win32.refresh_win32(window)
+        if macos():
+            from wowfish.capture import _quartz
+
+            infos = _quartz.window_infos(_quartz.INCLUDING_WINDOW, window.handle)
+            return _quartz.refreshed_from_infos(infos, window)
+    except (NotSupported, OSError, ValueError, RuntimeError):
+        return window
+    return window
+
+
 def get_capturer(window: WindowRef | None = None) -> Capturer:
     if window is not None and window.compositor:
         from wowfish.capture._wayland import GrimCapturer
@@ -168,5 +203,6 @@ __all__ = [
     "linux_x11",
     "list_windows",
     "macos",
+    "refresh_window",
     "same_window",
 ]

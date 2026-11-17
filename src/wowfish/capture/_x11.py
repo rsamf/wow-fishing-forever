@@ -194,6 +194,29 @@ def find_window_x11(title_substring: str, pid: int | None = None) -> WindowRef |
         d.close()
 
 
+def refresh_x11(window: WindowRef) -> WindowRef | None:
+    """The window's current place and size; None once the X server no longer knows its id."""
+    from dataclasses import replace
+
+    from Xlib import X, display
+    from Xlib.error import BadDrawable, BadWindow
+
+    d = display.Display()
+    try:
+        w = d.create_resource_object("window", window.handle)
+        try:
+            attrs = w.get_attributes()
+            if attrs.map_state != X.IsViewable:
+                return window  # minimized or on another workspace: still open
+            geo = w.get_geometry()
+            origin = d.screen().root.translate_coords(w, 0, 0)
+        except (BadWindow, BadDrawable):
+            return None
+        return replace(window, left=origin.x, top=origin.y, width=geo.width, height=geo.height)
+    finally:
+        d.close()
+
+
 class X11WindowCapturer:
     def __init__(self) -> None:
         self._lib: Any = None

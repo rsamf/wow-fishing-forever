@@ -93,3 +93,31 @@ def find_window_win32(title_substring: str) -> WindowRef | None:
     wanted = title_substring.lower()
     found = [r for r in list_windows_win32() if wanted in r.title.lower()]
     return max(found, key=lambda r: r.width * r.height, default=None)
+
+
+def refresh_win32(window: WindowRef) -> WindowRef | None:
+    """The window's current client area; None once the handle is no longer a window."""
+    if sys.platform != "win32" or window.handle is None:
+        return window
+    from ctypes import wintypes
+    from dataclasses import replace
+
+    user32: Any = ctypes.windll.user32
+    for fn in (user32.IsWindow, user32.IsIconic):
+        fn.argtypes = [wintypes.HWND]
+    user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+    hwnd = window.handle
+    if not user32.IsWindow(hwnd):
+        return None
+    rect = wintypes.RECT()
+    if user32.IsIconic(hwnd) or not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+        return window
+    origin = wintypes.POINT(0, 0)
+    user32.ClientToScreen(hwnd, ctypes.byref(origin))
+    x, y, w, h = client_rect_to_box(
+        rect.left, rect.top, rect.right, rect.bottom, origin.x, origin.y
+    )
+    if w <= 0 or h <= 0:
+        return window
+    return replace(window, left=x, top=y, width=w, height=h)

@@ -24,6 +24,7 @@ APPLICATION_SERVICES = (
 
 ON_SCREEN_ONLY = 1 << 0  # kCGWindowListOptionOnScreenOnly
 EXCLUDE_DESKTOP = 1 << 4  # kCGWindowListExcludeDesktopElements
+INCLUDING_WINDOW = 1 << 3  # kCGWindowListOptionIncludingWindow: just the window asked for
 UTF8 = 0x08000100  # kCFStringEncodingUTF8
 SINT64 = 4  # kCFNumberSInt64Type
 DOUBLE = 13  # kCFNumberDoubleType
@@ -111,8 +112,11 @@ def _number(cf: Any, ref: int | None, kind: int = SINT64) -> float | None:
     return out.value
 
 
-def window_infos() -> list[dict[str, Any]]:
-    """Every on-screen window, front to back, as plain dicts (see pick_quartz_window).
+def window_infos(
+    option: int = ON_SCREEN_ONLY | EXCLUDE_DESKTOP, relative_to: int = 0
+) -> list[dict[str, Any]]:
+    """Every on-screen window, front to back, as plain dicts (see pick_quartz_window); or, with
+    INCLUDING_WINDOW, the one window numbered `relative_to` wherever it is.
 
     Without the Screen Recording permission macOS leaves out other apps' window names.
     """
@@ -121,7 +125,7 @@ def window_infos() -> list[dict[str, Any]]:
         k: constant(cg, f"kCGWindow{k}")
         for k in ("Number", "Name", "OwnerName", "OwnerPID", "Layer", "Alpha", "Bounds")
     }
-    array = cg.CGWindowListCopyWindowInfo(ON_SCREEN_ONLY | EXCLUDE_DESKTOP, 0)
+    array = cg.CGWindowListCopyWindowInfo(option, relative_to)
     if not array:
         return []
     infos: list[dict[str, Any]] = []
@@ -195,6 +199,17 @@ def pick_quartz_window(infos: list[dict[str, Any]], title_substring: str) -> Win
         ):
             best = ref
     return best
+
+
+def refreshed_from_infos(infos: list[dict[str, Any]], window: WindowRef) -> WindowRef | None:
+    """The window where `infos` now has it, by its number; None when it is not among them."""
+    from dataclasses import replace
+
+    for info in infos:
+        if info.get("number") == window.handle:
+            x, y, w, h = info["bounds"]
+            return replace(window, left=round(x), top=round(y), width=round(w), height=round(h))
+    return None
 
 
 def list_windows_quartz() -> list[WindowRef]:
