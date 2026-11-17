@@ -153,7 +153,10 @@ def refresh_window(window: WindowRef) -> WindowRef | None:
     return window
 
 
-def get_capturer(window: WindowRef | None = None) -> Capturer:
+def get_capturer(window: WindowRef | None = None, *, own_pixels: bool = False) -> Capturer:
+    """The capturer for `window`. `own_pixels` asks for one that still sees the window while
+    another covers it: X11 always does; Windows and macOS switch from reading the screen to
+    reading the window; a native Wayland window on Hyprland can only be read off the screen."""
     if window is not None and window.compositor:
         from wowfish.capture._wayland import GrimCapturer
 
@@ -162,6 +165,17 @@ def get_capturer(window: WindowRef | None = None) -> Capturer:
         from wowfish.capture._x11 import X11WindowCapturer
 
         return X11WindowCapturer()
+    if own_pixels and window is not None and window.handle is not None:
+        from wowfish.capture._own import WindowPixelsCapturer
+
+        if sys.platform == "win32":
+            from wowfish.capture._win32 import snapshot_win32
+
+            return WindowPixelsCapturer(snapshot_win32)
+        if macos():
+            from wowfish.capture._quartz import snapshot_quartz
+
+            return WindowPixelsCapturer(snapshot_quartz)
     try:
         import mss  # noqa: F401
     except Exception:

@@ -31,6 +31,7 @@ from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
 from wowfish.capture import WindowRef, _quartz, _wayland, _x11
+from wowfish.capture._own import WindowPixelsCapturer
 from wowfish.capture._quartz import (
     frontmost_pid,
     quartz_windows,
@@ -775,6 +776,29 @@ def test_background_fishing_borrows_focus_and_gives_it_back():
     pond.front = "editor"
     pond, lines = _fish(BehaviorConfig(), 1, pond=pond)
     assert pond.focus_log == ["game"] and len(pond.pressed) > 5  # off: focus once, at the start
+
+
+def test_covered_game_is_read_from_its_own_pixels(monkeypatch):
+    """With background fishing on, Windows and macOS read the game window itself instead of
+    the screen, so another window on top does not hide the bobber; a window that cannot be read
+    (minimized) is an error, not a black frame. Without it they read the screen as before."""
+    frame = np.arange(4 * 6 * 3, dtype=np.uint8).reshape(4, 6, 3)
+    shots: list[np.ndarray | None] = [frame, frame, None]
+    asked: list[int] = []
+    cap = WindowPixelsCapturer(lambda handle: asked.append(handle) or shots.pop(0))
+    cap.open(WindowRef("World of Warcraft", 7, 0, 0, 6, 4, handle=42))
+    assert np.array_equal(cap.grab(), frame)
+    assert np.array_equal(cap.grab((1, 2, 3, 2)), frame[2:4, 1:4])
+    with pytest.raises(RuntimeError, match="minimized"):
+        cap.grab()
+    assert asked == [42, 42, 42]
+
+    window = WindowRef("World of Warcraft", 7, 0, 0, 6, 4, handle=42)
+    monkeypatch.setattr(capture, "linux_x11", lambda: False)
+    for platform in ("win32", "darwin"):
+        monkeypatch.setattr(sys, "platform", platform)
+        assert isinstance(capture.get_capturer(window, own_pixels=True), WindowPixelsCapturer)
+        assert not isinstance(capture.get_capturer(window), WindowPixelsCapturer)
 
 
 def test_background_help_tells_hyprland_users_the_catch():

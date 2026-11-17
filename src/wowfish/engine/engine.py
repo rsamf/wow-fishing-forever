@@ -704,7 +704,7 @@ def build_engine(
     return FishingEngine(
         cfg,
         window,
-        capturer=get_capturer(window),
+        capturer=get_capturer(window, own_pixels=cfg.run.background),
         input_device=get_input_device(window),
         audio_source=audio,
         detector=detector,
