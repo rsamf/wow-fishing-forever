@@ -32,8 +32,6 @@ body:
     attributes:
       label: In wowfish
       options:
-        - label: "I am on the latest release (or the latest `main`)"
-          required: true
         - label: "I picked the game window in the window picker when I pressed Start"
           required: true
         - label: "I searched the open and closed issues for this problem"
@@ -74,6 +72,12 @@ body:
         - Linux (GNOME or KDE on Wayland, game under Xwayland)
         - Linux (Hyprland)
         - macOS
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: "What version of wowfish are you running? (i.e. v1.2.0)
     validations:
       required: true
   - type: dropdown
