@@ -1,0 +1,95 @@
+name: Bug report
+description: The bot does not start, does not find the bobber, misses bites, or misbehaves
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Most problems come from a game setting, so please go through the
+        checklist first. Tick each box once you have checked it.
+  - type: checkboxes
+    id: game-setup
+    attributes:
+      label: In the game
+      options:
+        - label: "**Ambience** is 0 and **Music** is 0, and **Sound Effects** is up (*Options > Sound*)"
+          required: true
+        - label: "**Interact With Target** is bound to the interact key set in wowfish (*Options > Keybindings > Targeting*)"
+          required: true
+        - label: "The gear icon shows on game objects: I typed `/console SoftTargetIconGameObject 1` in chat, and I can see the gold gear over the bobber after a cast"
+          required: true
+        - label: "**Auto Loot** is on (*Options > Gameplay > Controls*)"
+          required: true
+        - label: "**Fishing** is on the action bar key set as the cast key in wowfish"
+          required: true
+        - label: "I did not move or zoom the camera after the gear icon was detected"
+          required: true
+        - label: "If I use background fishing: **Sound in Background** is on, and the game window is open (not minimized)"
+          required: false
+  - type: checkboxes
+    id: bot-setup
+    attributes:
+      label: In wowfish
+      options:
+        - label: "I am on the latest release (or the latest `main`)"
+          required: true
+        - label: "I picked the game window in the window picker when I pressed Start"
+          required: true
+        - label: "I searched the open and closed issues for this problem"
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      description: What you did, what the bot did, and what it should have done. Screenshots of the Fish tab help.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "Ran `wowfish doctor` and pasted its output here:"
+      description: Run `wowfish doctor` in a terminal (or `wowfish.exe doctor` on Windows) and paste everything it prints.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Pasted recent logs here:"
+      description: >-
+        The first line of `wowfish doctor` shows where the log file is. Paste the last 100 lines
+        or so, from a run that shows the problem. In the GUI, the Logs tab on the Fish page has
+        the same lines.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux (X11)
+        - Linux (GNOME or KDE on Wayland, game under Xwayland)
+        - Linux (Hyprland)
+        - macOS
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How do you run wowfish?
+      options:
+        - Downloaded executable, GUI
+        - Downloaded executable, terminal (`wowfish run`)
+        - From source, GUI
+        - From source, terminal (`wowfish run`)
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config (optional)
+      description: Paste the output of `wowfish config` if you changed any settings.
+      render: toml

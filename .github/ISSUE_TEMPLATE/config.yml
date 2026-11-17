@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup instructions
+    url: https://github.com/rsamf/wow-fishing-forever#go-fish
+    about: The in-game settings and wowfish setup, step by step. Most problems are answered here.

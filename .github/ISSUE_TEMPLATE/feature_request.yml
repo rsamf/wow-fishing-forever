@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest something the bot should do, or do differently
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you ask
+      options:
+        - label: "I searched the open and closed issues, and this has not been asked for"
+          required: true
+        - label: "This is about fishing with wowfish (not another profession or another kind of automation)"
+          required: true
+        - label: "It works by looking at the screen, listening to the game and pressing keys (wowfish does not read memory, inject code, or use an addon)"
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: What you are trying to do and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should wowfish do?
+      description: How it would behave, and where it would show up (Setup tab, Fish tab, config file, `wowfish run`).
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you have tried (optional)
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      multiple: true
+      options:
+        - Windows
+        - Linux
+        - macOS
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Can you help?
+      options:
+        - label: "I would like to open a pull request for this"
+          required: false
