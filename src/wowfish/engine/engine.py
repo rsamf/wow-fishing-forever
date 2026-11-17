@@ -351,7 +351,7 @@ class FishingEngine:
         self._last_listen = self._last_scores_sent = self._clock()
         self._change(
             State.WAIT_BITE,
-            f"Found the bobber at ({m.x}, {m.y})",
+            f"Gear icon detected at ({m.x}, {m.y})",
             f"Waiting for a splash; will press {self.cfg.game.interact_key} when I hear one",
         )
 
@@ -385,7 +385,7 @@ class FishingEngine:
         seen = self._track(now)
         if seen is False and self._misses >= self.lost_after:
             self._emit(ev.IconLost(self._t()))
-            self._miss("Lost sight of the bobber")
+            self._miss("Lost sight of the gear icon")
             return
         if now - self._t_cast > self.cfg.run.cast_timeout_s:
             clip, score = self._best_heard

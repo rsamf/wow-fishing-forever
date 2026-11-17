@@ -25,11 +25,11 @@ def describe(event: ev.Event) -> str:
         case ev.StateChanged(did=did, next=nxt):
             return f"{did}. {nxt}."
         case ev.IconFound(score=score, where=(x, y)):
-            return f"Found the bobber at ({x}, {y}), score {score:.2f}"
+            return f"Gear icon detected at ({x}, {y}), score {score:.2f}"
         case ev.Calibrated(size=size, score=score):
             return f"Measured the gear icon at {size} px (score {score:.2f})"
         case ev.IconLost():
-            return "Lost sight of the bobber"
+            return "Lost sight of the gear icon"
         case ev.BiteHeard(clip=clip, score=score):
             return f"Heard the splash ({score:.2f}, {clip})"
         case ev.KeyPressed(key=key, why="cast"):

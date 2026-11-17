@@ -42,7 +42,12 @@ class FishPage:
         self.next = tb.Label(f, text="", font=("TkDefaultFont", 11), wraplength=860, justify="left")
         self.next.pack(anchor="w", pady=(2, 0))
         self.stats = tb.Label(f, text=presenter.stats)
-        self.stats.pack(anchor="w", pady=(2, 8))
+        self.stats.pack(anchor="w", pady=(2, 2))
+        tb.Label(
+            f,
+            text="Do not move or zoom the camera once the gear icon is detected.",
+            bootstyle="warning",
+        ).pack(anchor="w", pady=(0, 8))
 
         mid = tb.Frame(f)
         mid.pack(fill="both", expand=True)

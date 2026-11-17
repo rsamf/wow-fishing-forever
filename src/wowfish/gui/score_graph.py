@@ -80,7 +80,7 @@ class ScoreGraph:
             x0, x1, y0, y1 = self._box
             c.create_text(
                 (x0 + x1) / 2, (y0 + y1) / 2, fill=MUTED, font=FONT, width=x1 - x0,
-                text="The clip scores show here once the bobber is found",
+                text="The clip scores show here once the gear icon is detected",
             )  # fmt: skip
         if tr is not None:
             self._outcome(tr)  # under the lines, so the bite's own line stays visible
