@@ -15,7 +15,7 @@ Install [uv](https://docs.astral.sh/uv/) and optionally [just](https://github.co
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
 | `just fmt` | `uv run ruff check --fix . && uv run ruff format .` |
 | `just build` | `uv run pyinstaller --clean --noconfirm packaging/wowfish.spec` |
-| `just smoke` | run the built executable: `--version`, `doctor`, `listen --list` (a one-line note on Linux and Windows) |
+| `just smoke` | run the built executable: `--version`, `doctor` |
 
 Unit tests never touch the network, the display, or audio hardware: `soundcard`, `mss`, and
 `Xlib` are imported lazily and the tests stub them. The X11 capture tests run only when
@@ -26,12 +26,12 @@ this automatically.
 
     src/wowfish/
       cli.py        typer app; registers the commands below
-      commands/     watch, listen, run, gui (one module each)
+      commands/     run, gui (one module each)
       config.py     TOML config: defaults, validation, save; adds new settings to old files at launch
       paths.py      config / cache / log locations (WOWFISH_HOME override)
       doctor.py     environment probes
       assets/       interact-icon sprites (PNG) and splash clips (WAV) shipped in the package
-      vision/       templates, regions, masked matcher, acquire/track search, calibration, annotate
+      vision/       templates, regions, masked matcher, acquire/track search, calibration
       audio/        WAV I/O, log-mel features, fingerprints, bite detector, loopback devices
       capture/      window lookup and capture: X11 (ctypes XGetImage), Hyprland (IPC + grim),
                     Windows (user32 + mss), macOS (CoreGraphics window list + mss), stub

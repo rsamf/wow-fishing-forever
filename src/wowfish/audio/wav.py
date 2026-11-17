@@ -31,15 +31,6 @@ def read_wav(path: Path | str) -> tuple[np.ndarray, int]:
     return np.ascontiguousarray(y, dtype=np.float32), rate
 
 
-def write_wav(path: Path | str, samples: np.ndarray, rate: int) -> None:
-    pcm = np.clip(np.asarray(samples, dtype=np.float32) * 32767.0, -32768, 32767).astype("<i2")
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(pcm.tobytes())
-
-
 def resample(samples: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
     """Linear resampling. Adequate here: the features stop at 8 kHz on broadband noise."""
     if src_rate == dst_rate:

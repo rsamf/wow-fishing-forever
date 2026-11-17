@@ -29,4 +29,3 @@ build:
 smoke:
     ./dist/wowfish --version
     ./dist/wowfish doctor
-    ./dist/wowfish listen --list

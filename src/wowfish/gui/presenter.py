@@ -133,8 +133,6 @@ class _Meter:
                 self.detector.feed(AudioChunk(samples, self.source.sample_rate, frames / 22050))
                 self.level_dbfs = self.detector.level_dbfs
                 self.scores = {s.name: s.score for s in self.detector.last_scores}
-                if getattr(self.source, "exhausted", False):
-                    break
 
 
 class Presenter:

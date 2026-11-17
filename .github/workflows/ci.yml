@@ -49,7 +49,6 @@ jobs:
         run: |
           ./dist/wowfish --version
           ./dist/wowfish doctor
-          ./dist/wowfish listen --list
           ./dist/wowfish-gui --version
 
       - name: Smoke GUI window (Linux)
@@ -66,7 +65,6 @@ jobs:
         run: |
           .\dist\wowfish.exe --version; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           .\dist\wowfish.exe doctor;    if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          .\dist\wowfish.exe listen --list; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           .\dist\wowfish-gui.exe --version | Out-Host; if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Smoke GUI window (Windows)

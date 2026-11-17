@@ -59,8 +59,6 @@ class ThreadedSource:
                     self._frames += len(samples)
                     while self._frames > self._max_frames and len(self._chunks) > 1:
                         self._frames -= len(self._chunks.popleft())
-                if getattr(self.inner, "exhausted", False):
-                    break
         except BaseException as e:  # surface on the next read instead of dying silently
             self.error = e
         finally:

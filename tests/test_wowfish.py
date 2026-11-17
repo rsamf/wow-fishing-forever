@@ -313,7 +313,7 @@ def test_window_picker_lists_every_window_guess_first(monkeypatch):
 
 
 def test_terminal_picker_reads_a_window_number(capsys):
-    """`run`, `listen` and `watch --live` list the windows by number, the guess first and
+    """`wowfish run` lists the windows by number, the guess first and
     marked; Enter takes #1, a number picks, anything else asks again; no windows or the end of
     input stops with an error instead of picking one itself."""
     a = WindowChoice(WindowRef("魔兽世界", 7, 0, 0, 2560, 1440, handle=1), "Wow.exe", True)

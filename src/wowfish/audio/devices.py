@@ -75,7 +75,7 @@ def _mac_input(selector: str) -> Any:
         (m for m in mics if selector in str(m.id) or wanted in str(m.name).lower()), None
     )
     if mic is None:
-        raise AudioUnavailable(f"no input device matches {selector!r}; run `wowfish listen --list`")
+        raise AudioUnavailable(f"no input device matches {selector!r}; pick one on the Setup tab")
     return mic
 
 
