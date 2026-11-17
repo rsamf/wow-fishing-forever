@@ -8,7 +8,16 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from wowfish.capture import GAME_TITLE, WindowRef, find_window, list_windows, same_window
+import numpy as np
+
+from wowfish.capture import (
+    GAME_TITLE,
+    WindowRef,
+    find_window,
+    linux_x11,
+    list_windows,
+    same_window,
+)
 
 
 @dataclass(frozen=True)
@@ -78,3 +87,72 @@ def app_name(window: WindowRef) -> str:
 def window_choices(title: str = GAME_TITLE) -> list[WindowChoice]:
     """Every window the user can pick, the title guess first. Platform errors propagate."""
     return order_choices(list_windows(), find_window(title), app_name)
+
+
+def _snapshot(window: WindowRef) -> np.ndarray | None:
+    if window.compositor == "hyprland":
+        from wowfish.capture._wayland import snapshot_hyprland
+
+        return snapshot_hyprland(window)
+    if window.handle is None:
+        return None
+    if linux_x11():
+        from wowfish.capture._x11 import X11WindowCapturer
+
+        cap = X11WindowCapturer()
+        cap.open(window)
+        try:
+            return cap.grab()
+        finally:
+            cap.close()
+    if sys.platform == "win32":
+        from wowfish.capture._win32 import snapshot_win32
+
+        return snapshot_win32(window.handle)
+    if sys.platform == "darwin":
+        from wowfish.capture._quartz import snapshot_quartz
+
+        return snapshot_quartz(window.handle)
+    return None
+
+
+def window_snapshot(window: WindowRef, width: int = 240) -> np.ndarray | None:
+    """What the window shows now, as BGR at most `width` px wide; None when it cannot be had
+    (minimized, on another workspace, no permission), which the picker shows as a placeholder."""
+    import cv2
+
+    try:
+        frame = _snapshot(window)
+        if frame is None or frame.size == 0:
+            return None
+        h, w = frame.shape[:2]
+        if w > width:
+            size = (width, max(1, round(h * width / w)))
+            frame = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
+        return frame
+    except Exception:
+        return None
+
+
+def window_icon(window: WindowRef, size: int = 24) -> np.ndarray | None:
+    """The window's (or its app's) icon as size x size BGRA; None when there is none to show."""
+    try:
+        if window.compositor == "hyprland":
+            from wowfish.capture._wayland import icon_hyprland
+
+            return icon_hyprland(window, size)
+        if linux_x11() and window.handle is not None:
+            from wowfish.capture._x11 import icon_x11
+
+            return icon_x11(window.handle, size)
+        if sys.platform == "win32" and window.handle is not None:
+            from wowfish.capture._win32 import icon_win32
+
+            return icon_win32(window.handle, size)
+        if sys.platform == "darwin" and window.pid is not None:
+            from wowfish.capture._quartz import icon_quartz
+
+            return icon_quartz(window.pid, size)
+    except Exception:
+        return None
+    return None

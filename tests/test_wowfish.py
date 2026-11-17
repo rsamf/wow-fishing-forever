@@ -36,7 +36,13 @@ from wowfish.capture._quartz import (
     quartz_windows,
     refreshed_from_infos,
 )
-from wowfish.capture._wayland import hyprland_windows, pick_hyprland_window, refresh_hyprland
+from wowfish.capture._wayland import (
+    hyprland_windows,
+    on_shown_workspace,
+    pick_hyprland_window,
+    refresh_hyprland,
+)
+from wowfish.capture._x11 import icon_from_net_wm_icon
 from wowfish.capture.choices import WindowChoice, order_choices
 from wowfish.cli import _setup_logging, app
 from wowfish.commands._common import pick_window_or_fail
@@ -293,6 +299,12 @@ def test_window_picker_lists_every_window_guess_first(monkeypatch):
     unguessed = order_choices([term, tab], None, lambda w: "")
     assert [(c.window, c.guess) for c in unguessed] == [(tab, False), (term, False)]
 
+    argb = [2, 2, 0xFF0000FF, 0x80FF0000, 0x00000000, 0xFFFFFFFF]  # blue, half red, clear, white
+    icon = icon_from_net_wm_icon([1, 1, 0xFF00FF00, *argb], 2)
+    assert icon is not None and icon.shape == (2, 2, 4)
+    assert icon[0].tolist() == [[255, 0, 0, 255], [0, 0, 255, 128]]
+    assert icon_from_net_wm_icon([], 24) is None and icon_from_net_wm_icon([5, 5, 1], 24) is None
+
 
 def test_terminal_picker_reads_a_window_number(capsys):
     """`run`, `listen` and `watch --live` list the windows by number, the guess first and
@@ -361,6 +373,9 @@ def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
     hidden = [{**c, "hidden": True, "mapped": False} for c in clients]
     assert refresh_hyprland(hidden, monitors, w) == w  # still there, just not shown
     assert refresh_hyprland([c for c in clients if c["address"] != "0x2a"], monitors, w) is None
+    shown = [{"id": 1, "activeWorkspace": {"id": 3}, "specialWorkspace": {"id": 0}}]
+    assert on_shown_workspace({"monitor": 1, "workspace": {"id": 3}}, shown)
+    assert not on_shown_workspace({"monitor": 1, "workspace": {"id": 4}}, shown)
 
     clients.append(client("0x5d", "World of Warcraft", [0, 0], [2560, 1440], 2, 7, xwayland=True))
     x = pick_hyprland_window(clients, monitors, "world of warcraft")

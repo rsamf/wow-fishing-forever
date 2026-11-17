@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -213,6 +214,42 @@ def refresh_x11(window: WindowRef) -> WindowRef | None:
         except (BadWindow, BadDrawable):
             return None
         return replace(window, left=origin.x, top=origin.y, width=geo.width, height=geo.height)
+    finally:
+        d.close()
+
+
+def icon_from_net_wm_icon(values: Sequence[int], size: int) -> np.ndarray | None:
+    """A size x size BGRA icon from a _NET_WM_ICON list (width, height, then that many ARGB
+    pixels, repeated): the smallest icon at least `size` wide, else the largest."""
+    import cv2
+
+    icons: list[tuple[int, int, int]] = []  # (width, height, offset of the pixels)
+    i = 0
+    while i + 2 <= len(values):
+        w, h = int(values[i]), int(values[i + 1])
+        if w <= 0 or h <= 0 or i + 2 + w * h > len(values):
+            break
+        icons.append((w, h, i + 2))
+        i += 2 + w * h
+    if not icons:
+        return None
+    big_enough = [icon for icon in icons if icon[0] >= size]
+    w, h, at = min(big_enough) if big_enough else max(icons)
+    argb = np.asarray(values[at : at + w * h], dtype=np.uint64).astype(np.uint32).reshape(h, w)
+    bgra = np.dstack([(argb >> shift) & 0xFF for shift in (0, 8, 16, 24)]).astype(np.uint8)
+    if (w, h) != (size, size):
+        bgra = cv2.resize(bgra, (size, size), interpolation=cv2.INTER_AREA)
+    return bgra
+
+
+def icon_x11(handle: int, size: int) -> np.ndarray | None:
+    from Xlib import X, display
+
+    d = display.Display()
+    try:
+        w = d.create_resource_object("window", handle)
+        prop = w.get_full_property(d.intern_atom("_NET_WM_ICON"), X.AnyPropertyType, 1 << 22)
+        return icon_from_net_wm_icon(list(prop.value), size) if prop else None
     finally:
         d.close()
 

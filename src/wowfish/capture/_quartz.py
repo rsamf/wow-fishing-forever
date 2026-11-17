@@ -225,6 +225,93 @@ def find_window_quartz(title_substring: str) -> WindowRef | None:
     return pick_quartz_window(window_infos(), title_substring)
 
 
+def snapshot_quartz(number: int) -> Any:
+    """The window's own pixels as BGR at nominal resolution, even when covered; None when
+    macOS will not give them (no Screen Recording permission, or the call is gone)."""
+    import numpy as np
+
+    cg, cf = frameworks()
+    create = getattr(cg, "CGWindowListCreateImage", None)
+    if create is None:
+        return None
+    vp, size_t = ctypes.c_void_p, ctypes.c_size_t
+    create.argtypes, create.restype = (
+        [CGRect, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32],
+        vp,
+    )
+    for fn, args, res in (
+        (cg.CGImageGetWidth, [vp], size_t),
+        (cg.CGImageGetHeight, [vp], size_t),
+        (cg.CGImageGetBytesPerRow, [vp], size_t),
+        (cg.CGImageGetDataProvider, [vp], vp),
+        (cg.CGDataProviderCopyData, [vp], vp),
+        (cg.CGImageRelease, [vp], None),
+        (cf.CFDataGetBytePtr, [vp], vp),
+        (cf.CFDataGetLength, [vp], ctypes.c_long),
+    ):
+        fn.argtypes, fn.restype = args, res
+    null = CGRect(CGPoint(float("inf"), float("inf")), CGSize(0.0, 0.0))  # CGRectNull
+    image = create(null, INCLUDING_WINDOW, number, 1 | 16)  # BoundsIgnoreFraming | NominalRes
+    if not image:
+        return None
+    try:
+        w, h = cg.CGImageGetWidth(image), cg.CGImageGetHeight(image)
+        row = cg.CGImageGetBytesPerRow(image)
+        data = cg.CGDataProviderCopyData(cg.CGImageGetDataProvider(image))
+        if not data or w < 1 or h < 1:
+            return None
+        try:
+            raw = ctypes.string_at(cf.CFDataGetBytePtr(data), cf.CFDataGetLength(data))
+        finally:
+            cf.CFRelease(data)
+        bgra = np.frombuffer(raw, dtype=np.uint8, count=row * h).reshape(h, row)[:, : w * 4]
+        return np.ascontiguousarray(bgra.reshape(h, w, 4)[:, :, :3])
+    finally:
+        cg.CGImageRelease(image)
+
+
+def icon_quartz(pid: int, size: int) -> Any:
+    """The app's icon as size x size BGRA, asked of AppKit through the Objective-C runtime."""
+    import cv2
+    import numpy as np
+
+    if sys.platform != "darwin":
+        return None
+    objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+    ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+    vp = ctypes.c_void_p
+    objc.objc_getClass.argtypes, objc.objc_getClass.restype = [ctypes.c_char_p], vp
+    objc.sel_registerName.argtypes, objc.sel_registerName.restype = [ctypes.c_char_p], vp
+
+    def send(
+        obj: Any, selector: str, *args: Any, types: tuple[Any, ...] = (), res: Any = vp
+    ) -> Any:
+        fn = ctypes.cast(objc.objc_msgSend, ctypes.CFUNCTYPE(res, vp, vp, *types))
+        return fn(obj, objc.sel_registerName(selector.encode()), *args)
+
+    pool = send(objc.objc_getClass(b"NSAutoreleasePool"), "new")
+    try:
+        app = send(
+            objc.objc_getClass(b"NSRunningApplication"),
+            "runningApplicationWithProcessIdentifier:",
+            pid,
+            types=(ctypes.c_int,),
+        )
+        icon = send(app, "icon") if app else None
+        tiff = send(icon, "TIFFRepresentation") if icon else None
+        if not tiff:
+            return None
+        raw = ctypes.string_at(send(tiff, "bytes"), send(tiff, "length", res=ctypes.c_ulong))
+        img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+        if img is None or img.ndim != 3:
+            return None
+        if img.shape[2] == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+        return cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
+    finally:
+        send(pool, "drain")
+
+
 def screen_capture_available(request: bool = False) -> tuple[bool, str]:
     """Whether macOS lets this process see other apps' windows; `request` shows its prompt."""
     cg, _ = frameworks()
