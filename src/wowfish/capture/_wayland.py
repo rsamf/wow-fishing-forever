@@ -16,11 +16,12 @@ import shutil
 import socket
 import subprocess
 from collections.abc import Sequence
+from functools import cache
 from typing import Any
 
 import numpy as np
 
-from wowfish.capture import Box, WindowRef
+from wowfish.capture import Box, WindowRef, grab_once, square_bgra
 from wowfish.errors import NotSupported
 
 GRIM = "grim"
@@ -37,16 +38,24 @@ def _hyprland_socket() -> str:
     raise NotSupported(f"Hyprland IPC (no .socket.sock for instance {sig!r})")
 
 
-def hyprland_request(command: str) -> Any:
-    """Send one request to Hyprland's IPC socket and return the JSON reply (`hyprctl -j`)."""
+def _hyprland_send(payload: str) -> bytes:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.settimeout(2.0)
         s.connect(_hyprland_socket())
-        s.sendall(f"j/{command}".encode())
+        s.sendall(payload.encode())
         parts: list[bytes] = []
         while chunk := s.recv(65536):
             parts.append(chunk)
-    return json.loads(b"".join(parts) or b"{}")
+    return b"".join(parts)
+
+
+def hyprland_request(command: str) -> Any:
+    """Send one request to Hyprland's IPC socket and return the JSON reply (`hyprctl -j`)."""
+    return json.loads(_hyprland_send(f"j/{command}") or b"{}")
+
+
+def _address(client: dict[str, Any]) -> int:
+    return int(str(client.get("address") or "0"), 16)
 
 
 def _client_ref(c: dict[str, Any], scales: dict[Any, float]) -> WindowRef:
@@ -93,13 +102,12 @@ def refresh_hyprland(
     clients: Sequence[dict[str, Any]], monitors: Sequence[dict[str, Any]], window: WindowRef
 ) -> WindowRef | None:
     """The window's client as it is now, by address; None once Hyprland no longer lists it."""
-    for c in clients:
-        if c.get("xwayland") or int(str(c.get("address") or "0"), 16) != window.handle:
-            continue
-        if not c.get("mapped", True) or c.get("hidden"):
-            return window  # still there, just not shown
-        return _client_ref(c, _scales(monitors))
-    return None
+    c = _client_of(window, clients)
+    if c is None or c.get("xwayland"):
+        return None
+    if not c.get("mapped", True) or c.get("hidden"):
+        return window  # still there, just not shown
+    return _client_ref(c, _scales(monitors))
 
 
 def list_windows_hyprland() -> list[WindowRef]:
@@ -121,9 +129,7 @@ def on_shown_workspace(client: dict[str, Any], monitors: Sequence[dict[str, Any]
 
 
 def _client_of(window: WindowRef, clients: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
-    return next(
-        (c for c in clients if int(str(c.get("address") or "0"), 16) == window.handle), None
-    )
+    return next((c for c in clients if _address(c) == window.handle), None)
 
 
 def snapshot_hyprland(window: WindowRef) -> np.ndarray | None:
@@ -131,12 +137,7 @@ def snapshot_hyprland(window: WindowRef) -> np.ndarray | None:
     client = _client_of(window, hyprland_request("clients"))
     if client is None or not on_shown_workspace(client, hyprland_request("monitors")):
         return None
-    cap = GrimCapturer()
-    cap.open(window)
-    try:
-        return cap.grab()
-    finally:
-        cap.close()
+    return grab_once(GrimCapturer(), window)
 
 
 def _data_dirs() -> list[str]:
@@ -144,6 +145,7 @@ def _data_dirs() -> list[str]:
     return [home, *(os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")]
 
 
+@cache  # one pass over the .desktop files per window class, not per window
 def _desktop_icon_name(app_class: str) -> str | None:
     """The Icon= of the .desktop file named after the window class (or claiming it)."""
     wanted = app_class.lower()
@@ -183,23 +185,15 @@ def icon_hyprland(window: WindowRef, size: int) -> np.ndarray | None:
     paths.append(f"/usr/share/pixmaps/{icon}.png")
     for path in paths:
         if path.endswith(".png") and os.path.exists(path):
-            img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-            if img is None or img.ndim != 3:
-                continue
-            if img.shape[2] == 3:
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
-            return cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
+            icon_image = square_bgra(cv2.imread(path, cv2.IMREAD_UNCHANGED), size)
+            if icon_image is not None:
+                return icon_image
     return None
 
 
 def hyprland_dispatch(dispatcher: str) -> None:
     """Run a Hyprland dispatcher such as "focuswindow address:0x2a" (`hyprctl dispatch`)."""
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-        s.settimeout(2.0)
-        s.connect(_hyprland_socket())
-        s.sendall(f"/dispatch {dispatcher}".encode())
-        while s.recv(4096):
-            pass
+    _hyprland_send(f"/dispatch {dispatcher}")
 
 
 def focus_hyprland(address: int) -> None:
@@ -216,7 +210,7 @@ def hyprland_address(window: WindowRef) -> int | None:
     ]
     titled = [c for c in owned if c.get("title") == window.title]
     client = (titled or owned or [None])[0]
-    return int(str(client["address"]), 16) if client else None
+    return _address(client) if client else None
 
 
 def active_window_hyprland() -> int | None:

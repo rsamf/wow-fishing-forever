@@ -31,7 +31,6 @@ class AppStream:
     serial: int  # object.serial: what `pw-record --target` accepts
     name: str  # application.name, or node.name
     pid: int | None
-    binary: str
 
 
 def _run_pw_dump() -> str:
@@ -83,7 +82,6 @@ def list_app_streams(*, dump: Callable[[], str] | None = None) -> list[AppStream
                 int(props["object.serial"]),
                 str(props.get("application.name") or props.get("node.name") or "?"),
                 int(pid) if pid is not None else None,
-                str(props.get("application.process.binary") or ""),
             )
         )
     return out
@@ -109,14 +107,13 @@ def _descends_from(pid: int, ancestor: int, parent_of: Callable[[int], int | Non
 
 
 def pick_stream(
-    streams: Sequence[AppStream], pid: int, parent_of: Callable[[int], int | None] | None = None
+    streams: Sequence[AppStream], pid: int, parent_of: Callable[[int], int | None] = _parent_pid
 ) -> AppStream | None:
     """The stream of process `pid`, else of a process it started (as Windows captures a process
     tree). Never by name: the user picked the window, and only its app is heard."""
     for s in streams:
         if s.pid == pid:
             return s
-    parent_of = parent_of or _parent_pid
     for s in streams:
         if s.pid is not None and _descends_from(s.pid, pid, parent_of):
             return s

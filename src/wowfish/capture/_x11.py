@@ -10,11 +10,13 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 from collections.abc import Sequence
+from contextlib import closing
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
 
-from wowfish.capture import Box, WindowRef
+from wowfish.capture import Box, WindowRef, square_bgra
 from wowfish.errors import NotSupported
 
 _ZPIXMAP = 2
@@ -159,29 +161,21 @@ def _titled_windows(d: Any) -> list[WindowRef]:
 def list_windows_x11() -> list[WindowRef]:
     """Every viewable titled client window. A window without _NET_WM_PID gets the pid the X
     server records, so wowfish's own Tk window is recognised."""
-    from dataclasses import replace
-
     from Xlib import display
 
-    d = display.Display()
-    try:
+    with closing(display.Display()) as d:
         return [
             r if r.pid is not None else replace(r, pid=_xres_pid(d, r.handle or 0))
             for r in _titled_windows(d)
         ]
-    finally:
-        d.close()
 
 
 def refresh_x11(window: WindowRef) -> WindowRef | None:
     """The window's current place and size; None once the X server no longer knows its id."""
-    from dataclasses import replace
-
     from Xlib import X, display
     from Xlib.error import BadDrawable, BadWindow
 
-    d = display.Display()
-    try:
+    with closing(display.Display()) as d:
         w = d.create_resource_object("window", window.handle)
         try:
             attrs = w.get_attributes()
@@ -191,16 +185,12 @@ def refresh_x11(window: WindowRef) -> WindowRef | None:
             origin = d.screen().root.translate_coords(w, 0, 0)
         except (BadWindow, BadDrawable):
             return None
-        return replace(window, left=origin.x, top=origin.y, width=geo.width, height=geo.height)
-    finally:
-        d.close()
+        return window.moved(origin.x, origin.y, geo.width, geo.height)
 
 
 def icon_from_net_wm_icon(values: Sequence[int], size: int) -> np.ndarray | None:
     """A size x size BGRA icon from a _NET_WM_ICON list (width, height, then that many ARGB
     pixels, repeated): the smallest icon at least `size` wide, else the largest."""
-    import cv2
-
     icons: list[tuple[int, int, int]] = []  # (width, height, offset of the pixels)
     i = 0
     while i + 2 <= len(values):
@@ -215,21 +205,16 @@ def icon_from_net_wm_icon(values: Sequence[int], size: int) -> np.ndarray | None
     w, h, at = min(big_enough) if big_enough else max(icons)
     argb = np.asarray(values[at : at + w * h], dtype=np.uint64).astype(np.uint32).reshape(h, w)
     bgra = np.dstack([(argb >> shift) & 0xFF for shift in (0, 8, 16, 24)]).astype(np.uint8)
-    if (w, h) != (size, size):
-        bgra = cv2.resize(bgra, (size, size), interpolation=cv2.INTER_AREA)
-    return bgra
+    return square_bgra(bgra, size)
 
 
 def icon_x11(handle: int, size: int) -> np.ndarray | None:
     from Xlib import X, display
 
-    d = display.Display()
-    try:
+    with closing(display.Display()) as d:
         w = d.create_resource_object("window", handle)
         prop = w.get_full_property(d.intern_atom("_NET_WM_ICON"), X.AnyPropertyType, 1 << 22)
         return icon_from_net_wm_icon(list(prop.value), size) if prop else None
-    finally:
-        d.close()
 
 
 class X11WindowCapturer:

@@ -318,7 +318,7 @@ def hyprland_focus_window(window: WindowRef) -> None:
         if address is not None:
             focus_hyprland(address)
     except Exception:
-        pass  # the engine checks is_game_focused and pauses when focus did not move
+        pass
 
 
 def hyprland_restore_focus(token: object | None) -> None:

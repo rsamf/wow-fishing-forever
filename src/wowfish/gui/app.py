@@ -34,7 +34,6 @@ class App:
     def tick(self) -> None:
         view = self.p.poll()
         self.fish.render(view)
-        self.setup.render(view)
 
     def _tick(self) -> None:
         try:

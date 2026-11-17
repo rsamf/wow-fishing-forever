@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import ctypes
 import sys
+from functools import cache
 from typing import Any
 
 from wowfish.capture import Box, WindowRef
@@ -94,7 +95,6 @@ def refresh_win32(window: WindowRef) -> WindowRef | None:
     if sys.platform != "win32" or window.handle is None:
         return window
     from ctypes import wintypes
-    from dataclasses import replace
 
     user32: Any = ctypes.windll.user32
     for fn in (user32.IsWindow, user32.IsIconic):
@@ -114,7 +114,7 @@ def refresh_win32(window: WindowRef) -> WindowRef | None:
     )
     if w <= 0 or h <= 0:
         return window
-    return replace(window, left=x, top=y, width=w, height=h)
+    return window.moved(x, y, w, h)
 
 
 class _BitmapInfoHeader(ctypes.Structure):
@@ -137,6 +137,7 @@ def _top_down_header(width: int, height: int) -> _BitmapInfoHeader:
     return _BitmapInfoHeader(ctypes.sizeof(_BitmapInfoHeader), width, -height, 1, 32, 0)
 
 
+@cache
 def _gdi() -> tuple[Any, Any]:
     from ctypes import wintypes
 

@@ -68,15 +68,6 @@ def describe(event: ev.Event) -> str:
     return type(event).__name__
 
 
-# -- what the GUI is told besides engine events ----------------------------------------------------
-
-
-@dataclass(frozen=True)
-class WorkerFailed:
-    what: str
-    message: str
-
-
 @dataclass
 class ScoreTrace:
     """One cast's per-clip scores for the Scores graph, from the bobber found to bite/timeout."""
@@ -98,7 +89,6 @@ class View:
     thumbnail_png: bytes | None
     running: bool
     new_lines: list[str] = field(default_factory=list)
-    log_events: list[object] = field(default_factory=list)
     trace: ScoreTrace = field(default_factory=ScoreTrace)
 
 
@@ -107,17 +97,15 @@ class Presenter:
         self,
         *,
         build_engine: Callable[..., Any] | None = None,
-        list_devices: Callable[[], list[Any]] | None = None,
     ) -> None:
-        from wowfish.audio.devices import audio_follows_window, list_loopback_devices
+        from wowfish.audio.devices import audio_follows_window
         from wowfish.engine.engine import build_engine as real_build
 
         self._build_engine = build_engine or real_build
-        self._list_devices = list_devices or list_loopback_devices
         self.audio_follows_window: bool = audio_follows_window()
 
         self.cfg: Config = load_config()[0]
-        self._results: queue.Queue[object] = queue.Queue()
+        self._failures: queue.Queue[str] = queue.Queue()  # what Start could not do
         self._thread: EngineThread | None = None
         self.state = State.IDLE.name
         self.did = "Not started"
@@ -140,7 +128,7 @@ class Presenter:
         for name in (cast, interact, *(k for k in (quit_, lure) if k)):
             if not keys.is_supported_key(name):
                 raise ValueError(f"unsupported key {name!r}: use a letter, digit, F1-F12, or space")
-        self.reload()  # pick up what is in the file now
+        self.reload()
         game = replace(
             self.cfg.game, cast_key=cast, interact_key=interact, quit_key=quit_, lure_key=lure
         )
@@ -150,14 +138,14 @@ class Presenter:
     def save_session_minutes(self, minutes: int) -> None:
         if minutes < 0:
             raise ValueError("the time limit must be 0 (forever) or more minutes")
-        self.reload()  # pick up what is in the file now
+        self.reload()
         if minutes != self.cfg.game.session_minutes:  # saving rewrites the file; skip if unchanged
             save_config(replace(self.cfg, game=replace(self.cfg.game, session_minutes=minutes)))
             self.reload()
 
     def save_background(self, on: bool) -> None:
         """Whether the bot fishes while another window has focus; used from the next Start."""
-        self.reload()  # pick up what is in the file now
+        self.reload()
         if on != self.cfg.run.background:
             save_config(replace(self.cfg, run=replace(self.cfg.run, background=on)))
             self.reload()
@@ -166,10 +154,12 @@ class Presenter:
         """macOS cannot capture one app, so there it is the input devices, BlackHole first
         (default). Elsewhere the bot hears the picked window's app and there is nothing to choose.
         """
+        from wowfish.audio.devices import list_loopback_devices
+
         if self.audio_follows_window:
             return []
         try:
-            return list(self._list_devices())
+            return list_loopback_devices()
         except AudioUnavailable:
             return []
 
@@ -191,27 +181,18 @@ class Presenter:
             raise ValueError(f"{value.strip() or 'empty'} is not a number") from None
         if not 0.0 < threshold <= 1.0:
             raise ValueError("must be more than 0 and at most 1")
-        self.reload()  # pick up what is in the file now
+        self.reload()
         save_config(replace(self.cfg, audio=replace(self.cfg.audio, bite_threshold=threshold)))
         self.reload()
         return threshold
-
-    def preflight(self, request: bool = False) -> list[str]:
-        """What rules out even looking at windows: the platform, or a missing macOS permission.
-
-        `request` also asks macOS for missing permissions, which shows its prompt.
-        """
-        from wowfish.engine.engine import missing_permissions, unsupported_platform
-
-        problem = unsupported_platform()
-        return ([problem] if problem else []) + missing_permissions(request)
 
     def prerequisites(self, request: bool = False) -> list[str]:
         """What blocks Start before a window is picked, in plain words; empty when the bot can
         run. Start passes `request`; the check when the window opens does not."""
         from wowfish.audio.devices import mac_device_name
+        from wowfish.engine.engine import preflight_problems
 
-        reasons = self.preflight(request)
+        reasons = preflight_problems(request)
         if not self.audio_follows_window:
             try:
                 mac_device_name(self.cfg.audio.device)
@@ -225,15 +206,14 @@ class Presenter:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, window: Any, minutes: float | None = None) -> None:
+    def start(self, window: Any) -> None:
         if self.running:
             return
         self.reload()
         try:
-            session_s = None if minutes is None else minutes * 60
-            engine = self._build_engine(self.cfg, window, session_s=session_s)
+            engine = self._build_engine(self.cfg, window)
         except Exception as e:
-            self._results.put(WorkerFailed("start", str(e)))
+            self._failures.put(f"Cannot start: {e}")
             return
         self._thread = EngineThread(engine)
         self._thread.start()
@@ -252,7 +232,6 @@ class Presenter:
 
     def poll(self) -> View:
         lines: list[str] = []
-        items: list[object] = []
         if self._thread is not None:
             q = self._thread.events
             while True:
@@ -263,7 +242,6 @@ class Presenter:
                 if isinstance(event, ev.Scores):  # the graph's feed: not a log line
                     self._add_scores(event)
                     continue
-                items.append(event)
                 lines.append(describe(event))
                 logger.debug(lines[-1])
                 self._apply(event)
@@ -271,14 +249,12 @@ class Presenter:
                 self._thread = None
         while True:
             try:
-                item = self._results.get_nowait()
+                lines.append(self._failures.get_nowait())
             except queue.Empty:
                 break
-            items.append(item)
-            lines.append(self._describe_result(item))
         return View(
             self.state, self.did, self.next, self.stats, self.thumbnail_png, self.running,
-            lines, items, self.trace,
+            lines, self.trace,
         )  # fmt: skip
 
     def _add_scores(self, event: ev.Scores) -> None:
@@ -316,9 +292,3 @@ class Presenter:
                 self.state, self.did, self.next = State.STOPPED.name, f"Stopped ({reason})", "Idle"
             case ev.Error(message=message):
                 self.did = f"Error: {message}"
-
-    def _describe_result(self, item: object) -> str:
-        match item:
-            case WorkerFailed(what=what, message=message):
-                return f"Cannot {what}: {message}"
-        return str(item)

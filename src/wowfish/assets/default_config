@@ -19,7 +19,6 @@ lure_key = ""
 lure_minutes = 10.0
 
 [vision]
-# The bot measures the gear icon's size on the first cast of every run; nothing is saved.
 # Frames wider than this are downscaled before matching.
 match_width = 1920
 

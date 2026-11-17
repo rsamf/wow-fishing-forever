@@ -1,4 +1,4 @@
-"""One-time measurement of the icon's on-screen size from a screenshot that shows it."""
+"""Measure the icon's on-screen size from a frame that shows it."""
 
 from __future__ import annotations
 
@@ -27,7 +27,6 @@ PROMINENCE_MIN = 0.25  # real gears 0.33-0.41; gold UI icons reached 0.16
 @dataclass(frozen=True)
 class Calibration:
     icon_size_px: int
-    native_size: int
     score: float
     x: int
     y: int
@@ -106,5 +105,4 @@ def calibrate_icon_scale(
     off = [run(max(1, round(best_side * k)), best_region).score for k in OFF_SCALE]
     off = [s for s in off if s > NO_MATCH]
     prominence = best.score - max(off) if off and best.score > NO_MATCH else 0.0
-    native = template_for_size(templates, best_side).native_size
-    return Calibration(best_side, native, best.score, best.x, best.y, best.gold, prominence)
+    return Calibration(best_side, best.score, best.x, best.y, best.gold, prominence)

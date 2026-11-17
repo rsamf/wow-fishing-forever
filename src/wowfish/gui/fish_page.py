@@ -50,7 +50,7 @@ class FishPage:
         left.pack(side="left", anchor="n")
         self.image = tb.Label(left, text="no icon seen yet", anchor="center", width=60)
         self.image.pack(anchor="n")
-        # shown under the image once there is one: an image means the gear icon was detected
+        # packed on the first thumbnail
         self.camera_note = tb.Label(
             left, text="Do not move or zoom the camera", bootstyle="warning"
         )

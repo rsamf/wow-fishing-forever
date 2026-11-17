@@ -5,10 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from wowfish.capture import linux_hyprland
-from wowfish.gui.presenter import (
-    Presenter,
-    View,
-)
+from wowfish.gui.presenter import Presenter
 
 CHECKLIST = (
     "In the game, before starting:\n"
@@ -175,17 +172,12 @@ class SetupPage:
         then = f"; then the bot presses {quit_key} to quit the game" if quit_key else ""
         self.limit_note.configure(text=f"saved; used from the next Start{then}")
 
-    def _selected_device(self) -> str | None:
-        if self.device is None:
-            return None
-        i = self.device.current()
-        return self.devices[i].id if 0 <= i < len(self.devices) else None
-
     def _save_device(self) -> None:
-        sel = self._selected_device()
-        if sel is not None:
-            self.p.save_audio_device(sel)
-            self.device_note.configure(text=f"saved {sel}; used from the next Start")
+        i = self.device.current()
+        if 0 <= i < len(self.devices):
+            name = self.devices[i].id
+            self.p.save_audio_device(name)
+            self.device_note.configure(text=f"saved {name}; used from the next Start")
 
     def _save_background(self) -> None:
         on = bool(self.background.get())
@@ -201,8 +193,3 @@ class SetupPage:
             self.bite_note.configure(text=str(e))
             return
         self.bite_note.configure(text=f"saved {saved:.2f}; used from the next Start")
-
-    # -- rendering --------------------------------------------------------------------------
-
-    def render(self, view: View) -> None:
-        """Nothing on this tab changes while the bot runs."""

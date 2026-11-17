@@ -14,9 +14,10 @@ from wowfish.capture import (
     GAME_TITLE,
     WindowRef,
     best_title_match,
+    grab_once,
     linux_x11,
     list_windows,
-    same_window,
+    macos,
 )
 
 
@@ -30,13 +31,12 @@ class WindowChoice:
 def order_choices(
     windows: Sequence[WindowRef], guess: WindowRef | None, app_of: Callable[[WindowRef], str]
 ) -> list[WindowChoice]:
-    """The guess first and only once, then the rest from the largest down."""
-    if guess is not None:  # the copy from the list is the complete one (its pid filled in)
-        guess = next((w for w in windows if same_window(guess, w)), guess)
-    rest = [w for w in windows if guess is None or not same_window(guess, w)]
-    rest.sort(key=lambda w: w.width * w.height, reverse=True)
-    first = [WindowChoice(guess, app_of(guess), True)] if guess is not None else []
-    return first + [WindowChoice(w, app_of(w), False) for w in rest]
+    """The guess (one of `windows`) first, then the rest from the largest down."""
+    rest = sorted(
+        (w for w in windows if w is not guess), key=lambda w: w.width * w.height, reverse=True
+    )
+    first = [guess] if guess is not None else []
+    return [WindowChoice(w, app_of(w), w is guess) for w in first + rest]
 
 
 def _app_name_win32(pid: int) -> str:
@@ -79,7 +79,7 @@ def app_name(window: WindowRef) -> str:
                 return f.read().strip()
         if sys.platform == "win32":
             return _app_name_win32(window.pid)
-        if sys.platform == "darwin":
+        if macos():
             return _app_name_macos(window.pid)
     except Exception:
         return ""
@@ -88,7 +88,7 @@ def app_name(window: WindowRef) -> str:
 
 def window_choices(title: str = GAME_TITLE) -> list[WindowChoice]:
     """Every window the user can pick, the title guess first. Platform errors propagate."""
-    windows = list_windows()  # listed once: the guess is one of these
+    windows = list_windows()
     return order_choices(windows, best_title_match(windows, title), app_name)
 
 
@@ -102,17 +102,12 @@ def _snapshot(window: WindowRef) -> np.ndarray | None:
     if linux_x11():
         from wowfish.capture._x11 import X11WindowCapturer
 
-        cap = X11WindowCapturer()
-        cap.open(window)
-        try:
-            return cap.grab()
-        finally:
-            cap.close()
+        return grab_once(X11WindowCapturer(), window)
     if sys.platform == "win32":
         from wowfish.capture._win32 import snapshot_win32
 
         return snapshot_win32(window.handle)
-    if sys.platform == "darwin":
+    if macos():
         from wowfish.capture._quartz import snapshot_quartz
 
         return snapshot_quartz(window.handle)
@@ -152,7 +147,7 @@ def window_icon(window: WindowRef, size: int = 24) -> np.ndarray | None:
             from wowfish.capture._win32 import icon_win32
 
             return icon_win32(window.handle, size)
-        if sys.platform == "darwin" and window.pid is not None:
+        if macos() and window.pid is not None:
             from wowfish.capture._quartz import icon_quartz
 
             return icon_quartz(window.pid, size)

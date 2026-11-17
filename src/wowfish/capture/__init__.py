@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -28,6 +28,13 @@ class WindowRef:
     handle: int | None = None  # native window id where the platform has one
     compositor: str | None = None  # "hyprland" for a native Wayland window, else None
     scale: float = 1.0  # the Wayland output's scale: grab pixels per logical pixel
+
+    @property
+    def box(self) -> Box:
+        return self.left, self.top, self.width, self.height
+
+    def moved(self, left: int, top: int, width: int, height: int) -> WindowRef:
+        return replace(self, left=left, top=top, width=width, height=height)
 
 
 @runtime_checkable
@@ -65,15 +72,9 @@ def best_title_match(windows: Sequence[WindowRef], title_substring: str) -> Wind
     )
 
 
-def same_window(a: WindowRef, b: WindowRef) -> bool:
-    """Whether two refs name one window, wherever it has moved to since."""
-    if a.handle is not None:
-        return (a.handle, a.compositor) == (b.handle, b.compositor)
-    return a == b
-
-
 def _platform_windows() -> list[WindowRef]:
     """Every window the platform lists, in its own order."""
+    found: list[WindowRef] = []
     if linux_hyprland():
         from wowfish.capture._wayland import list_windows_hyprland
 
@@ -82,16 +83,12 @@ def _platform_windows() -> list[WindowRef]:
         except (NotSupported, OSError, ValueError):
             if not linux_x11():
                 raise
-            found = []
-        if linux_x11():
-            from wowfish.capture._x11 import list_windows_x11
-
-            found += list_windows_x11()
-        return found
     if linux_x11():
         from wowfish.capture._x11 import list_windows_x11
 
-        return list_windows_x11()
+        return found + list_windows_x11()
+    if linux_hyprland():
+        return found
     if sys.platform == "win32":
         from wowfish.capture import _win32
 
@@ -113,9 +110,26 @@ def list_windows() -> list[WindowRef]:
     ]
 
 
-def find_window(title_substring: str = GAME_TITLE) -> WindowRef | None:
-    """The picker's first guess: the best title match in the list the picker shows."""
-    return best_title_match(list_windows(), title_substring)
+def grab_once(capturer: Capturer, window: WindowRef) -> np.ndarray:
+    """One frame of the window from a capturer opened just for it."""
+    capturer.open(window)
+    try:
+        return capturer.grab()
+    finally:
+        capturer.close()
+
+
+def square_bgra(img: np.ndarray | None, size: int) -> np.ndarray | None:
+    """An icon image as size x size BGRA; None when it is not a colour image."""
+    import cv2
+
+    if img is None or img.ndim != 3:
+        return None
+    if img.shape[2] == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+    if img.shape[:2] != (size, size):
+        img = cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
+    return img
 
 
 def refresh_window(window: WindowRef) -> WindowRef | None:
@@ -189,17 +203,14 @@ def get_capturer(window: WindowRef | None = None, *, own_pixels: bool = False) -
 
 __all__ = [
     "GAME_TITLE",
-    "MIN_SIDE_PX",
     "Box",
     "Capturer",
     "WindowRef",
     "best_title_match",
-    "find_window",
     "get_capturer",
     "linux_hyprland",
     "linux_x11",
     "list_windows",
     "macos",
     "refresh_window",
-    "same_window",
 ]

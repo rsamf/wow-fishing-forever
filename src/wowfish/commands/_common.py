@@ -34,14 +34,11 @@ def load_config_or_fail() -> Config:
 
 def preflight_or_fail() -> None:
     """Stop before any window is listed when the platform or a macOS permission rules it out."""
-    from wowfish.engine.engine import missing_permissions, unsupported_platform
+    from wowfish.engine.engine import preflight_problems
 
-    problem = unsupported_platform()
-    if problem:
-        fail(problem)
-    missing = missing_permissions(request=True)
-    if missing:
-        fail("; ".join(missing))
+    problems = preflight_problems(request=True)
+    if problems:
+        fail("; ".join(problems))
 
 
 def pick_window_or_fail(

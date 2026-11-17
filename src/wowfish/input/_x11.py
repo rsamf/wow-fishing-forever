@@ -149,7 +149,6 @@ class X11InputDevice:
         if linux_hyprland():
             hyprland_focus_window(window)
         elif window.handle is not None:
-            # the engine checks is_game_focused and pauses when focus did not move
             with contextlib.suppress(Exception):
                 self._activate(window.handle)
 

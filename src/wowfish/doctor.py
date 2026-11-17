@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from wowfish import __version__, paths
-from wowfish.capture import linux_hyprland, macos
+from wowfish.capture import linux_hyprland, linux_x11, macos
 
 Level = Literal["ok", "warn", "fail"]
 
@@ -103,30 +103,6 @@ def probe_opencv() -> ProbeResult:
     return ProbeResult("opencv", "ok", cv2.__version__)
 
 
-def probe_audio() -> ProbeResult:
-    from wowfish.audio import AudioUnavailable, devices
-
-    try:
-        found = devices.list_loopback_devices()
-    except AudioUnavailable as e:
-        return ProbeResult("audio", "warn", f"no audio backend ({e})")
-    if not found:
-        return ProbeResult(
-            "audio",
-            "warn",
-            "no loopback devices (macOS: install a virtual device such as BlackHole)",
-        )
-    if macos() and not any(d.is_default for d in found):
-        return ProbeResult(
-            "audio",
-            "warn",
-            f"{len(found)} input device(s) but no BlackHole; install it and route the game's "
-            "sound through it (see the README)",
-        )
-    default = next((d.name for d in found if d.is_default), found[0].name)
-    return ProbeResult("audio", "ok", f"{len(found)} loopback device(s), default: {default}")
-
-
 def probe_game_audio() -> ProbeResult:
     from wowfish.audio import AudioUnavailable, devices
     from wowfish.config import ConfigError, load_config
@@ -182,11 +158,10 @@ def probe_input() -> ProbeResult:
     if macos():
         ok, detail = _accessibility_available()
         return ProbeResult("input", "ok" if ok else "warn", detail)
-    x11 = sys.platform == "linux" and bool(os.environ.get("DISPLAY"))
     checks: list[tuple[bool, str]] = []
     if linux_hyprland():  # a native Wayland game takes the virtual keyboard, an Xwayland one XTest
         checks.append(_virtual_keyboard_available())
-    if x11:
+    if linux_x11():
         checks.append(_xtest_available())
     if not checks:
         return ProbeResult("input", "warn", "key presses not supported yet on this platform")
@@ -212,7 +187,6 @@ def default_probes() -> list[Probe]:
         probe_system,
         probe_display,
         probe_opencv,
-        *([probe_audio] if macos() else []),
         probe_game_audio,
         probe_input,
         probe_config,

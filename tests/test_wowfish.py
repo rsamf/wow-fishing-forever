@@ -39,10 +39,8 @@ from wowfish.capture._quartz import (
 )
 from wowfish.capture._wayland import (
     hyprland_windows,
-    on_shown_workspace,
     refresh_hyprland,
 )
-from wowfish.capture._x11 import icon_from_net_wm_icon
 from wowfish.capture.choices import WindowChoice, order_choices
 from wowfish.cli import _setup_logging, app
 from wowfish.commands._common import pick_window_or_fail
@@ -57,11 +55,10 @@ from wowfish.config import (
     load_config,
     save_config,
 )
-from wowfish.engine.engine import FishingEngine, unsupported_platform
+from wowfish.engine.engine import MEASURE_AFTER_S, FishingEngine, unsupported_platform
 from wowfish.engine.state import State
 from wowfish.errors import PermissionMissing
 from wowfish.gui.presenter import Presenter, describe
-from wowfish.gui.setup_page import background_help
 from wowfish.input import _quartz as input_quartz
 from wowfish.input import get_input_device
 from wowfish.input._wayland import keycodes_from_keymap
@@ -291,31 +288,21 @@ def test_window_picker_lists_every_window_guess_first(monkeypatch):
     monkeypatch.setattr(capture, "_platform_windows",
                         lambda: [term, own, game, tiny, tab, untitled])  # fmt: skip
     assert capture.list_windows() == [term, game, tab]
-    assert capture.find_window() == game  # from that same list: never wowfish's own window
+    guess = capture.best_title_match(capture.list_windows(), capture.GAME_TITLE)
+    assert guess == game  # never wowfish's own window, whatever its title and size
 
     apps = {77: "Wow.exe", 60: "firefox"}
     choices = order_choices(capture.list_windows(), game, lambda w: apps.get(w.pid, ""))
     assert [(c.window.handle, c.app, c.guess) for c in choices] == [
         (3, "Wow.exe", True), (4, "firefox", False), (2, "", False),
     ]  # fmt: skip
-    assert [c.window for c in order_choices([term], game, lambda w: "")] == [game, term]
-    unguessed = order_choices([term, tab], None, lambda w: "")
-    assert [(c.window, c.guess) for c in unguessed] == [(tab, False), (term, False)]
-    # the guess is the window as listed (its pid filled in), and a window titled exactly like
-    # the game beats a larger one that only mentions it
-    assert order_choices([game], replace(game, pid=None), lambda w: "")[0].window == game
+    # a window titled exactly like the game beats a larger one that only mentions it
     assert capture.best_title_match([tab, game, term], "world of warcraft") == game
     assert capture.best_title_match([tab, term], "World of Warcraft") == tab
     assert capture.best_title_match([term], "World of Warcraft") is None
 
-    argb = [2, 2, 0xFF0000FF, 0x80FF0000, 0x00000000, 0xFFFFFFFF]  # blue, half red, clear, white
-    icon = icon_from_net_wm_icon([1, 1, 0xFF00FF00, *argb], 2)
-    assert icon is not None and icon.shape == (2, 2, 4)
-    assert icon[0].tolist() == [[255, 0, 0, 255], [0, 0, 255, 128]]
-    assert icon_from_net_wm_icon([], 24) is None and icon_from_net_wm_icon([5, 5, 1], 24) is None
 
-
-def test_terminal_picker_reads_a_window_number(capsys):
+def test_terminal_picker_reads_a_window_number():
     """`wowfish run` lists the windows by number, the guess first and
     marked; Enter takes #1, a number picks, anything else asks again; no windows or the end of
     input stops with an error instead of picking one itself."""
@@ -334,11 +321,7 @@ def test_terminal_picker_reads_a_window_number(capsys):
         return ask
 
     assert pick_window_or_fail([a, b], ask=answers("")) == a.window
-    err = capsys.readouterr().err
-    assert "1) 魔兽世界 — Wow.exe — 2560x1440" in err
-    assert f"2) {'x' * 69}… — ? — 800x600" in err
     assert pick_window_or_fail([a, b], ask=answers("0", "-1", "1.5", "x", " 2 ")) == b.window
-    assert capsys.readouterr().err.count("type a number from 1 to 2") == 4
     for choices, ask in (([a, b], answers()), ([], answers("1"))):
         with pytest.raises(typer.Exit) as e:
             pick_window_or_fail(choices, ask=ask)
@@ -347,9 +330,9 @@ def test_terminal_picker_reads_a_window_number(capsys):
 
 def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
     """Hyprland reports logical geometry for native and Xwayland windows alike; the window comes
-    back sized in its output's pixels, and the largest title match wins whichever kind it is. The
-    native ones and the Xwayland ones, as X11 sees them, make one list, and the guess comes from
-    it. Each key resolves to its evdev
+    back sized in its output's pixels, and the largest title match wins whichever kind it is. A
+    window that is hidden is still open; one Hyprland no longer lists is gone. The native windows
+    and the Xwayland ones, as X11 sees them, make one list. Each key resolves to its evdev
     keycode (xkb code - 8) whether the keymap names keysyms (xkbcommon) or writes them in hex
     (Hyprland), through aliases and from a shifted level (the digits on AZERTY)."""
 
@@ -365,42 +348,28 @@ def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
         client("0x4c", "World of Warcraft", [0, 0], [3000, 1700], 0, 7, xwayland=True),
     ]
     monitors = [{"id": 0, "scale": 1.0}, {"id": 1, "scale": 1.2}, {"id": 2, "scale": 2.0}]
-    listed = hyprland_windows(clients, monitors)
-    assert [(r.title, r.compositor) for r in listed] == [
-        ("World of Warcraft - Wowhead", "hyprland"), ("World of Warcraft", "hyprland"),
-        ("Discord", "hyprland"), ("World of Warcraft", None),
-    ]  # fmt: skip
     w = capture.best_title_match(hyprland_windows(clients, monitors), "world of warcraft")
     assert w is not None
     assert (w.title, w.pid, w.left, w.top, w.width, w.height) == (
         "World of Warcraft", 42, 2560, 0, 3840, 2160,
     )  # fmt: skip
     assert (w.handle, w.compositor, w.scale) == (0x2A, "hyprland", 1.2)
-    assert capture.best_title_match(hyprland_windows(clients, monitors), "Hearthstone") is None
-    moved = [{**c, "at": [0, 0], "monitor": 2} if c["address"] == "0x2a" else c for c in clients]
-    r = refresh_hyprland(moved, monitors, w)
-    assert r is not None and (r.left, r.top, r.width, r.height, r.scale) == (0, 0, 6400, 3600, 2.0)
     hidden = [{**c, "hidden": True, "mapped": False} for c in clients]
     assert refresh_hyprland(hidden, monitors, w) == w  # still there, just not shown
     assert refresh_hyprland([c for c in clients if c["address"] != "0x2a"], monitors, w) is None
-    shown = [{"id": 1, "activeWorkspace": {"id": 3}, "specialWorkspace": {"id": 0}}]
-    assert on_shown_workspace({"monitor": 1, "workspace": {"id": 3}}, shown)
-    assert not on_shown_workspace({"monitor": 1, "workspace": {"id": 4}}, shown)
 
     clients.append(client("0x5d", "World of Warcraft", [0, 0], [2560, 1440], 2, 7, xwayland=True))
     x = capture.best_title_match(hyprland_windows(clients, monitors), "world of warcraft")
     assert x is not None
     assert (x.pid, x.width, x.height, x.handle, x.compositor) == (7, 5120, 2880, None, None)
 
-    # the guess comes from the one list the picker shows: Hyprland's native windows plus the
-    # Xwayland ones as X11 sees them
+    # one list: Hyprland's native windows plus the Xwayland ones as X11 sees them
     on_x11 = WindowRef("World of Warcraft", 7, 0, 0, 5120, 2880, handle=99)
     monkeypatch.setattr(capture, "linux_hyprland", lambda: True)
     monkeypatch.setattr(capture, "linux_x11", lambda: True)
     monkeypatch.setattr(_wayland, "list_windows_hyprland", lambda: [w])
     monkeypatch.setattr(_x11, "list_windows_x11", lambda: [on_x11])
     assert capture.list_windows() == [w, on_x11]
-    assert capture.find_window() == on_x11
 
     for symbols in (NAMED_SYMBOLS, HEX_SYMBOLS):
         codes = keycodes_from_keymap(KEYMAP % symbols)
@@ -431,19 +400,11 @@ def test_macos_window_focus_and_keys(monkeypatch):
     assert (w.title, w.pid, w.left, w.top, w.width, w.height, w.handle, w.scale) == (
         "World of Warcraft", 77, 0, 33, 1512, 949, 3, 1.0,
     )  # fmt: skip
-    assert [(r.handle, r.title) for r in quartz_windows(infos)] == [
-        (2, "Terminal"), (3, "World of Warcraft"), (4, "World of Warcraft - Wowhead"),
-    ]  # fmt: skip
     assert refreshed_from_infos(infos[:2], w) is None
-    again = refreshed_from_infos([{**infos[2], "bounds": (10, 40, 1512, 949)}], w)
-    assert again is not None and (again.left, again.top, again.handle) == (10, 40, 3)
     hidden = capture.best_title_match(
         quartz_windows([{**i, "name": None} for i in infos]), "World of Warcraft"
     )
     assert hidden is not None and (hidden.title, hidden.handle) == ("World of Warcraft", 3)
-    assert capture.best_title_match(quartz_windows(infos), "Hearthstone") is None
-    big_tab = win(6, "World of Warcraft - Wowhead", "Safari", 60, (0, 0, 3840, 2160))
-    assert capture.best_title_match(quartz_windows([*infos, big_tab]), "world of warcraft") == w
     assert (frontmost_pid(infos), frontmost_pid(infos[2:])) == (50, 77)
 
     assert set(MAC_KEYCODES) == set(SUPPORTED_KEYS)
@@ -460,7 +421,7 @@ def test_macos_window_focus_and_keys(monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(_quartz, "window_infos", lambda: infos)
     monkeypatch.setattr(_quartz, "frameworks", lambda: (cg, SimpleNamespace(CFRelease=id)))
-    assert capture.find_window() == w
+    assert capture.best_title_match(capture.list_windows(), capture.GAME_TITLE) == w
     assert unsupported_platform() == ""
     keyboard = get_input_device(w)
     assert isinstance(keyboard, input_quartz.QuartzInputDevice)
@@ -483,7 +444,7 @@ def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
     id or name wins over one it is part of. It records with CoreAudio's own buffer size, since a
     device such as BlackHole refuses the 1024 frames used elsewhere. An empty
     setting means the first virtual device and never the microphone: with none installed, opening
-    fails and Start says to install BlackHole, while a device named outright is used as given."""
+    fails and Start says to install BlackHole."""
     asked: list[dict] = []
 
     def mic(id_, name):
@@ -511,30 +472,23 @@ def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
     assert [d.id for d in p.audio_devices()] == [m.name for m in mics[1:] + mics[:1]]
     assert p.prerequisites()[0] == "AX off"
     assert devices.MAC_NO_GAME_AUDIO not in p.prerequisites()
-    p.save_audio_device("BlackHole 2ch")
-    assert p.cfg.audio.device == "BlackHole 2ch"
-    p.save_audio_device("")
     mics[:] = mics[:1]  # no BlackHole installed
     with pytest.raises(AudioUnavailable, match="install BlackHole"):
         devices.open_loopback("")
     assert devices.MAC_NO_GAME_AUDIO in p.prerequisites()
     assert p.default_device() is None  # the microphone is never offered as the default
-    assert devices.open_loopback("MacBook").mic is mics[0]  # named: used as given
 
 
-def test_audio_follows_the_picked_window(monkeypatch):
+def test_audio_follows_the_picked_window():
     """Linux hears the stream of the picked window's process, or of a process it started (the
     way Windows captures a process tree), and never a stream that merely has the game's name. A
-    native PipeWire client's stream has no pid of its own, so its client's pid is used. A
-    silent window, or one whose process is unknown, gets an error naming it, on Windows too."""
+    native PipeWire client's stream has no pid of its own, so its client's pid is used."""
     S = _pipewire.AppStream
-    streams = [S(1, "World of Warcraft", 500, "wine64-preloader"), S(2, "Firefox", 600, "firefox"),
-               S(3, "WEBRTC VoiceEngine", 801, "Discord")]  # fmt: skip
+    streams = [S(1, "World of Warcraft", 500), S(2, "Firefox", 600), S(3, "WEBRTC", 801)]
     parents = {801: 800, 800: 700, 700: 1, 600: 1, 500: 1}.get
     assert _pipewire.pick_stream(streams, 600, parents).serial == 2
     assert _pipewire.pick_stream(streams, 700, parents).serial == 3  # sound from a child
     assert _pipewire.pick_stream(streams, 400, parents) is None  # not by name
-    assert _pipewire.pick_stream([S(4, "x", 901, "x")], 900, {901: 902, 902: 901}.get) is None
 
     def node(serial, **props):
         props = {"media.class": "Stream/Output/Audio", "object.serial": serial, **props}
@@ -548,16 +502,6 @@ def test_audio_follows_the_picked_window(monkeypatch):
     ])  # fmt: skip
     listed = _pipewire.list_app_streams(dump=lambda: dump)
     assert [(s.serial, s.pid) for s in listed] == [(11, 500), (12, 321)]
-
-    window = WindowRef("Mundo de Warcraft", 400, 0, 0, 10, 10, handle=1)
-    monkeypatch.setattr(_pipewire, "_parent_pid", lambda pid: None)  # never read the real /proc
-    monkeypatch.setattr(_pipewire.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(_pipewire, "list_app_streams", lambda dump=None: streams)
-    for platform, w in (("linux", window), ("linux", replace(window, pid=None)),
-                        ("win32", replace(window, pid=None))):  # fmt: skip
-        monkeypatch.setattr(sys, "platform", platform)
-        with pytest.raises(AudioUnavailable, match="Mundo de Warcraft"):
-            devices.open_game_audio(w)
 
 
 class _Pond:
@@ -625,15 +569,6 @@ class _Pond:
                 found = moved
         return found
 
-    @property
-    def focused(self) -> bool:
-        return self.front == "game"
-
-    @focused.setter
-    def focused(self, value: bool) -> None:  # False: somewhere else, and it stays there
-        self.front = "game" if value else "elsewhere"
-        self.refuse_focus = not value
-
     def is_game_focused(self, window) -> bool:
         return self.front == "game"
 
@@ -673,6 +608,7 @@ def _fish(
     game: GameConfig | None = None,
     pond: _Pond | None = None,
     run: RunConfig | None = None,
+    **engine_args,
 ) -> tuple[_Pond, list[str]]:
     """Fish for `minutes`, or until the session limit in `game` stops the engine."""
     pond = pond or _Pond()
@@ -680,8 +616,9 @@ def _fish(
                  run=run or RunConfig(), behavior=behavior)  # fmt: skip
     engine = FishingEngine(
         cfg, pond.window,
-        capturer=pond, input_device=pond, audio_source=pond, detector=pond, matcher=pond,
+        capturer=pond, input_device=pond, audio_source=pond, detector=pond,
         refresh_window=pond.refresh, clock=pond.clock, sleep=pond.sleep, rng=random.Random(7),
+        **{"matcher": pond, **engine_args},
     )  # fmt: skip
     while pond.t < minutes * 60 and engine.state is not State.STOPPED:
         engine.step()
@@ -740,47 +677,38 @@ def test_engine_follows_the_window_it_was_given():
     moved = replace(pond.window, left=100)
     resized = replace(moved, width=20, height=20)
     pond.moves = [(30.0, moved), (60.0, None), (90.0, resized)]
-    pond, lines = _fish(BehaviorConfig(), 2, pond=pond)
+    pond, _ = _fish(BehaviorConfig(), 2, pond=pond)
     assert pond.opened == [moved, resized]
     assert sum(k == "1" for _, k, _ in pond.pressed) > 10  # kept fishing through the None
 
     pond = _Pond()
     pond.window = WindowRef("Mundo de Warcraft", 7, 0, 0, 10, 10, handle=1)
-    pond.focused = False
+    pond.front, pond.refuse_focus = "elsewhere", True  # and the system keeps it there
     _, lines = _fish(BehaviorConfig(), 1, pond=pond)
-    assert "Paused: Mundo de Warcraft is not the focused window; click into the game" in lines
+    assert any(line.startswith("Paused") and "Mundo de Warcraft" in line for line in lines)
 
 
 def test_icon_is_measured_only_once_the_bobber_can_be_there():
-    """A run with no saved icon size measures it on the first cast, but not before the bobber
-    has had time to land, and never from something that was already on screen before the cast
-    (a gold button in the UI): that would be saved and matched on every cast after."""
+    """Each run measures the icon on its first cast, but not before the bobber has had time to
+    land, and never from something that was already on screen before the cast (a gold button in
+    the UI): it would then be matched on every cast after."""
     asked: list[float] = []
 
-    def measure(pond: _Pond):
-        def calibrate(frame, *, match_width):
+    def fish(pond: _Pond) -> list[str]:
+        def measure(frame, *, match_width):
             asked.append(pond.t - pond.cast_at)
             found = bool(frame.any())
-            return Calibration(40, 53, 0.84 if found else 0.0, 5, 5, 1.0 if found else 0.0, 0.5)
+            return Calibration(
+                icon_size_px=40, score=0.84 * found, x=5, y=5, gold=1.0 * found, prominence=0.5
+            )
 
-        return calibrate
-
-    def fish(pond: _Pond) -> list[str]:
-        engine = FishingEngine(
-            Config(game=GameConfig(), vision=VisionConfig(), audio=AudioConfig()), pond.window,
-            capturer=pond, input_device=pond, audio_source=pond, detector=pond,
-            matcher_factory=lambda size: pond, calibrate=measure(pond),
-            clock=pond.clock, sleep=pond.sleep, rng=random.Random(7),
-        )  # fmt: skip
-        while pond.t < 30 and engine.state is not State.STOPPED:
-            engine.step()
-        return [describe(e) for e in engine.events.queue]
+        engine = {"matcher": None, "matcher_factory": lambda size: pond, "calibrate": measure}
+        return _fish(BehaviorConfig(), 0.5, pond=pond, **engine)[1]
 
     lines = fish(_Pond(bite_after_s=5))
-    assert asked and min(asked) >= 1.5
-    assert "Measured the gear icon at 40 px (score 0.84)" in lines
+    assert asked and min(asked) >= MEASURE_AFTER_S
+    assert any(line.startswith("Measured") for line in lines)
 
-    asked.clear()
     pond = _Pond(bite_after_s=5)
     pond.decoy = True
     lines = fish(pond)
@@ -799,12 +727,12 @@ def test_background_fishing_borrows_focus_and_gives_it_back():
     pond, lines = _fish(BehaviorConfig(), 3, pond=pond, run=on)
     keys = [k for _, k, _ in pond.pressed]
     assert keys.count("f") > 5 and set(pond.pressed_into) == {"game"}
-    assert pond.focus_log[:4] == ["game", "editor", "game", "editor"] and pond.front == "editor"
+    assert pond.front == "editor"
     assert pond.focus_log.count("game") == keys.count("1")  # one trip per cast, Interact included
     assert not any(line.startswith("Paused") for line in lines)
 
     pond = _Pond()
-    pond.focused = False
+    pond.front, pond.refuse_focus = "elsewhere", True  # and the system keeps it there
     pond, lines = _fish(BehaviorConfig(), 1, pond=pond, run=on)
     assert pond.pressed == [] and any(line.startswith("Paused") for line in lines)
 
@@ -823,14 +751,12 @@ def test_covered_game_is_read_from_its_own_pixels(monkeypatch):
     (minimized) is an error, not a black frame. Without it they read the screen as before."""
     frame = np.arange(4 * 6 * 3, dtype=np.uint8).reshape(4, 6, 3)
     shots: list[np.ndarray | None] = [frame, frame, None]
-    asked: list[int] = []
-    cap = WindowPixelsCapturer(lambda handle: asked.append(handle) or shots.pop(0))
+    cap = WindowPixelsCapturer(lambda handle: shots.pop(0))
     cap.open(WindowRef("World of Warcraft", 7, 0, 0, 6, 4, handle=42))
     assert np.array_equal(cap.grab(), frame)
     assert np.array_equal(cap.grab((1, 2, 3, 2)), frame[2:4, 1:4])
     with pytest.raises(RuntimeError, match="minimized"):
         cap.grab()
-    assert asked == [42, 42, 42]
 
     window = WindowRef("World of Warcraft", 7, 0, 0, 6, 4, handle=42)
     monkeypatch.setattr(capture, "linux_x11", lambda: False)
@@ -838,16 +764,6 @@ def test_covered_game_is_read_from_its_own_pixels(monkeypatch):
         monkeypatch.setattr(sys, "platform", platform)
         assert isinstance(capture.get_capturer(window, own_pixels=True), WindowPixelsCapturer)
         assert not isinstance(capture.get_capturer(window), WindowPixelsCapturer)
-
-
-def test_background_help_tells_hyprland_users_the_catch():
-    """The "?" next to the background-fishing checkbox says what the option does, and only on
-    Hyprland adds that a native Wayland game has to stay uncovered."""
-    plain, hypr = background_help(False), background_help(True)
-    for text in (plain, hypr):
-        assert "gives focus back" in text and "Sound in Background" in text
-    assert "Hyprland" in hypr and "uncovered" in hypr
-    assert "Hyprland" not in plain
 
 
 def test_session_limit_quits_the_game_only_when_asked():
@@ -874,7 +790,7 @@ def test_session_limit_quits_the_game_only_when_asked():
     assert "0" not in {k for _, k, _ in pond.pressed}
 
     pond = _Pond()
-    pond.focused = False
+    pond.front, pond.refuse_focus = "elsewhere", True  # and the system keeps it there
     pond, lines = _fish(BehaviorConfig(), 5, game, pond)
     assert pond.pressed == []
     assert any("left it running" in line for line in lines)

@@ -210,9 +210,11 @@ class _Picker:
     # -- snapshots and icons ----------------------------------------------------------------
 
     def _snapshot_worker(self, generation: int, found: list[WindowChoice]) -> None:
-        for kind, make in (("snapshot", window_snapshot), ("icon", window_icon)):
-            size = self._snap_w if kind == "snapshot" else self._icon_px
+        kinds = (("snapshot", window_snapshot, self._snap_w), ("icon", window_icon, self._icon_px))
+        for kind, make, size in kinds:
             for i, choice in enumerate(found):
+                if generation != self._generation:
+                    return  # closed or refreshed: nobody is waiting for these
                 frame = make(choice.window, size)
                 if frame is not None:
                     with contextlib.suppress(Exception):

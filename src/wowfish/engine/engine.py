@@ -48,10 +48,6 @@ QUIT_TRIES = 3  # quit key presses before giving up on closing the game
 BUSY = (State.CASTING, State.WAIT_BITE, State.INTERACT)  # a cast in hand
 
 
-def unfocused(title: str) -> str:
-    return f"{title} is not the focused window; click into the game"
-
-
 class FishingEngine:
     def __init__(
         self,
@@ -82,8 +78,7 @@ class FishingEngine:
         self._matcher_factory = matcher_factory or (lambda size: matcher)
         self._calibrate = calibrate or _real_calibrate
         self._refresh_window = refresh_window
-        # Nothing about the icon is saved between runs: every run measures it on its first
-        # cast, since resolution and UI scale change the icon's size on screen.
+        # Measured on the first cast of every run: resolution and UI scale change the icon's size.
         self.threshold = ICON_THRESHOLD
         self.matcher = matcher
         self.search = IconSearch(self.matcher, self.threshold) if self.matcher else None
@@ -191,7 +186,7 @@ class FishingEngine:
             self._send_scores(now, flush=bool(bites))  # flush so the graph gets the bite's peak
 
         if self.state is State.IDLE:
-            if background and not self._borrow_focus():
+            if not self._ready_to_press():
                 self._pause(State.IDLE)
                 return
             self._cast(now)
@@ -209,23 +204,28 @@ class FishingEngine:
     def _game_in_front(self) -> bool:
         return self.input.is_game_focused(self.window) is not False
 
+    def _ready_to_press(self) -> bool:
+        """Whether a key may be pressed now: in the background that means taking focus first."""
+        return self._borrow_focus() if self.cfg.run.background else self._game_in_front()
+
     def _pause(self, resume: State) -> None:
         """Wait for the user to click into the game; `resume` is the state to pick up in."""
         if self.state is State.PAUSED:
             return
         self._resume_state = resume
         self.state = State.PAUSED
-        self._emit(ev.Paused(self._t(), unfocused(self.window.title)))
+        reason = f"{self.window.title} is not the focused window; click into the game"
+        self._emit(ev.Paused(self._t(), reason))
 
     def _borrow_focus(self) -> bool:
         """Bring the game to the front for a key press, remembering which window had focus.
         False when the system turned the request down: nothing may be pressed then."""
-        if self.input.is_game_focused(self.window) is not False:
+        if self._game_in_front():
             return True
         token = self.input.current_focus()
         self.input.focus_window(self.window)
         deadline = self._clock() + FOCUS_WAIT_S
-        while self.input.is_game_focused(self.window) is False:
+        while not self._game_in_front():
             if self._stop or self._clock() >= deadline:
                 return False
             self._sleep(TICK_S)
@@ -235,11 +235,10 @@ class FishingEngine:
 
     def _return_focus(self) -> None:
         """Hand focus back to the window it was borrowed from, unless the user has moved on."""
-        if not self._borrowed:
-            return
-        token, self._borrowed, self._focus_token = self._focus_token, False, None
-        if self.input.is_game_focused(self.window) is True:
-            self.input.restore_focus(token)
+        if self._borrowed:
+            self._borrowed = False
+            if self.input.is_game_focused(self.window) is True:
+                self.input.restore_focus(self._focus_token)
 
     def _follow_window(self) -> None:
         """Look at the picked window again: capture moves with it, and a new size means a new
@@ -249,16 +248,10 @@ class FishingEngine:
         found = self._refresh_window(self.window)
         if found is None:
             return
-        old = self.window
-        self.window = found
+        old, self.window = self.window, found
         if (found.width, found.height) != (old.width, old.height):
             self._sweeping = True  # the window changed size: measure the icon again
-        if (found.left, found.top, found.width, found.height) != (
-            old.left,
-            old.top,
-            old.width,
-            old.height,
-        ):
+        if found.box != old.box:
             self.capturer.close()
             self.capturer.open(found)
 
@@ -299,7 +292,7 @@ class FishingEngine:
 
     def _acquire(self, now: float) -> None:
         frame = self.capturer.grab()
-        if self.search is not None:  # fast path: the saved or last measured size
+        if self.search is not None:  # fast path: the last measured size
             _, m = self.search.step(frame)
             if m.accepted(self.threshold):
                 self._icon_timeouts = 0
@@ -337,6 +330,7 @@ class FishingEngine:
         self.threshold = cal.suggested_threshold()
         self.search = IconSearch(self.matcher, self.threshold)
         self._sweeping = False
+        self._before_cast = None  # a whole frame: not kept once the measurement is settled
         self._emit(ev.Calibrated(self._t(), int(cal.icon_size_px), float(cal.score)))
 
     def _found(self, frame: np.ndarray, m: Any) -> None:
@@ -369,7 +363,7 @@ class FishingEngine:
             self._wait(self.behavior.reaction_s())
             if self._stop:
                 return
-            if not (self._borrow_focus() if self.cfg.run.background else self._game_in_front()):
+            if not self._ready_to_press():
                 self._pause(State.WAIT_BITE)
                 return
             key = self.cfg.game.interact_key
@@ -456,14 +450,12 @@ class FishingEngine:
     def _quit_game(self) -> None:
         """Press the key of the player's /quit macro, if one is set, and wait for the game
         window to close; press it again while the window stays, QUIT_TRIES times in all."""
-        key, find = self.cfg.game.quit_key, self._refresh_window
+        key = self.cfg.game.quit_key
         if not key:
             return
         try:
-            if self.cfg.run.background:
-                self._borrow_focus()
             for _ in range(QUIT_TRIES):
-                if self.input.is_game_focused(self.window) is False:
+                if not self._ready_to_press():
                     self._emit(
                         ev.Error(
                             self._t(), "time is up, but the game is not focused; left it running"
@@ -471,14 +463,14 @@ class FishingEngine:
                     )
                     return
                 self._press(key, "quit")
-                if find is None:
+                if self._refresh_window is None:
                     return  # nothing to watch the window with
                 self._change(
                     State.IDLE,
                     f"Time is up; pressed {key} to quit the game",
                     f"Waiting up to {QUIT_WAIT_S:g} s for the game to close",
                 )
-                if self._wait_for_game_to_close(find):
+                if self._wait_for_game_to_close():
                     self._borrowed = False  # no game left to switch away from
                     self._change(State.IDLE, "The game closed", "Stopping")
                     return
@@ -494,11 +486,12 @@ class FishingEngine:
         except Exception as e:
             self._emit(ev.Error(self._t(), f"could not quit the game: {type(e).__name__}: {e}"))
 
-    def _wait_for_game_to_close(self, refresh: Callable[[WindowRef], WindowRef | None]) -> bool:
+    def _wait_for_game_to_close(self) -> bool:
         """Look for the game window every second for up to QUIT_WAIT_S; True once it is gone."""
+        assert self._refresh_window is not None
         deadline = self._clock() + QUIT_WAIT_S
         while not self._stop:
-            if refresh(self.window) is None:
+            if self._refresh_window(self.window) is None:
                 return True
             if self._clock() >= deadline:
                 return False
@@ -663,6 +656,13 @@ def missing_permissions(request: bool = False) -> list[str]:
     return missing
 
 
+def preflight_problems(request: bool = False) -> list[str]:
+    """What rules out even looking at windows: the platform, else missing macOS permissions
+    (`request` also asks macOS for those, which shows its prompt)."""
+    problem = unsupported_platform()
+    return [problem] if problem else missing_permissions(request)
+
+
 def build_engine(
     cfg: Config,
     window: WindowRef,
@@ -679,12 +679,9 @@ def build_engine(
     from wowfish.vision.matcher import IconMatcher
     from wowfish.vision.template import load_icon_templates, template_for_size
 
-    platform_problem = unsupported_platform()
-    if platform_problem:
-        raise RuntimeError(platform_problem)
-    missing = missing_permissions(request=True)
-    if missing:
-        raise RuntimeError("; ".join(missing))
+    problems = preflight_problems(request=True)
+    if problems:
+        raise RuntimeError("; ".join(problems))
     current = refresh_window(window)
     if current is None:
         raise RuntimeError(f"{window.title!r} is no longer open; pick it again")
@@ -695,13 +692,12 @@ def build_engine(
         return IconMatcher(template_for_size(templates, size), cfg.vision.match_width)
 
     detector = detector_for(cfg.audio)
-    audio: Any = ThreadedSource(open_game_audio(window, cfg.audio.device))
     return FishingEngine(
         cfg,
         window,
         capturer=get_capturer(window, own_pixels=cfg.run.background),
         input_device=get_input_device(window),
-        audio_source=audio,
+        audio_source=ThreadedSource(open_game_audio(window, cfg.audio.device)),
         detector=detector,
         matcher_factory=matcher_factory,
         refresh_window=refresh_window,

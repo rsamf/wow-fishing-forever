@@ -124,7 +124,6 @@ class QuartzInputDevice:
 
     def _activate(self, pid: object | None) -> None:
         if isinstance(pid, int):
-            # the engine checks is_game_focused and pauses when focus did not move
             with contextlib.suppress(Exception):
                 _quartz.activate_app(pid)
         self._focus = (-math.inf, None)  # look afresh

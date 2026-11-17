@@ -10,10 +10,12 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cache
 from typing import Any
 
-from wowfish.capture import WindowRef
+from wowfish.capture import WindowRef, square_bgra
 from wowfish.errors import NotSupported
 
 CORE_GRAPHICS = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
@@ -191,12 +193,10 @@ def quartz_windows(infos: list[dict[str, Any]]) -> list[WindowRef]:
 
 def refreshed_from_infos(infos: list[dict[str, Any]], window: WindowRef) -> WindowRef | None:
     """The window where `infos` now has it, by its number; None when it is not among them."""
-    from dataclasses import replace
-
     for info in infos:
         if info.get("number") == window.handle:
             x, y, w, h = info["bounds"]
-            return replace(window, left=round(x), top=round(y), width=round(w), height=round(h))
+            return window.moved(round(x), round(y), round(w), round(h))
     return None
 
 
@@ -254,6 +254,35 @@ def snapshot_quartz(number: int) -> Any:
         cg.CGImageRelease(image)
 
 
+@contextmanager
+def _running_app(pid: int) -> Iterator[tuple[Any, Any]]:
+    """(send, app): Objective-C message sending and the NSRunningApplication for `pid` (0 when
+    there is none), inside an autorelease pool."""
+    objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+    ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+    vp = ctypes.c_void_p
+    objc.objc_getClass.argtypes, objc.objc_getClass.restype = [ctypes.c_char_p], vp
+    objc.sel_registerName.argtypes, objc.sel_registerName.restype = [ctypes.c_char_p], vp
+
+    def send(
+        obj: Any, selector: str, *args: Any, types: tuple[Any, ...] = (), res: Any = vp
+    ) -> Any:
+        fn = ctypes.cast(objc.objc_msgSend, ctypes.CFUNCTYPE(res, vp, vp, *types))
+        return fn(obj, objc.sel_registerName(selector.encode()), *args)
+
+    pool = send(objc.objc_getClass(b"NSAutoreleasePool"), "new")
+    try:
+        app = send(
+            objc.objc_getClass(b"NSRunningApplication"),
+            "runningApplicationWithProcessIdentifier:",
+            pid,
+            types=(ctypes.c_int,),
+        )
+        yield send, app
+    finally:
+        send(pool, "drain")
+
+
 def icon_quartz(pid: int, size: int) -> Any:
     """The app's icon as size x size BGRA, asked of AppKit through the Objective-C runtime."""
     import cv2
@@ -261,65 +290,21 @@ def icon_quartz(pid: int, size: int) -> Any:
 
     if sys.platform != "darwin":
         return None
-    objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
-    ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
-    vp = ctypes.c_void_p
-    objc.objc_getClass.argtypes, objc.objc_getClass.restype = [ctypes.c_char_p], vp
-    objc.sel_registerName.argtypes, objc.sel_registerName.restype = [ctypes.c_char_p], vp
-
-    def send(
-        obj: Any, selector: str, *args: Any, types: tuple[Any, ...] = (), res: Any = vp
-    ) -> Any:
-        fn = ctypes.cast(objc.objc_msgSend, ctypes.CFUNCTYPE(res, vp, vp, *types))
-        return fn(obj, objc.sel_registerName(selector.encode()), *args)
-
-    pool = send(objc.objc_getClass(b"NSAutoreleasePool"), "new")
-    try:
-        app = send(
-            objc.objc_getClass(b"NSRunningApplication"),
-            "runningApplicationWithProcessIdentifier:",
-            pid,
-            types=(ctypes.c_int,),
-        )
+    with _running_app(pid) as (send, app):
         icon = send(app, "icon") if app else None
         tiff = send(icon, "TIFFRepresentation") if icon else None
         if not tiff:
             return None
         raw = ctypes.string_at(send(tiff, "bytes"), send(tiff, "length", res=ctypes.c_ulong))
         img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
-        if img is None or img.ndim != 3:
-            return None
-        if img.shape[2] == 3:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
-        return cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
-    finally:
-        send(pool, "drain")
+        return square_bgra(img, size)
 
 
 def activate_app(pid: int) -> bool:
     """Bring the app with this pid to the front (all of it: macOS focuses apps, not windows)."""
     if sys.platform != "darwin":
         return False
-    objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
-    ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
-    vp = ctypes.c_void_p
-    objc.objc_getClass.argtypes, objc.objc_getClass.restype = [ctypes.c_char_p], vp
-    objc.sel_registerName.argtypes, objc.sel_registerName.restype = [ctypes.c_char_p], vp
-
-    def send(
-        obj: Any, selector: str, *args: Any, types: tuple[Any, ...] = (), res: Any = vp
-    ) -> Any:
-        fn = ctypes.cast(objc.objc_msgSend, ctypes.CFUNCTYPE(res, vp, vp, *types))
-        return fn(obj, objc.sel_registerName(selector.encode()), *args)
-
-    pool = send(objc.objc_getClass(b"NSAutoreleasePool"), "new")
-    try:
-        app = send(
-            objc.objc_getClass(b"NSRunningApplication"),
-            "runningApplicationWithProcessIdentifier:",
-            pid,
-            types=(ctypes.c_int,),
-        )
+    with _running_app(pid) as (send, app):
         if not app:
             return False
         ignoring_other_apps = 1 << 1  # NSApplicationActivateIgnoringOtherApps
@@ -332,8 +317,6 @@ def activate_app(pid: int) -> bool:
                 res=ctypes.c_bool,
             )
         )
-    finally:
-        send(pool, "drain")
 
 
 def screen_capture_available(request: bool = False) -> tuple[bool, str]:
