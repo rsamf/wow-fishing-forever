@@ -142,7 +142,7 @@ Or run it from terminal:
     wowfish config                      # creates the config file; edit cast_key / interact_key
     wowfish run                         # measures the icon on its first cast; Ctrl-C stops
 
-Every time you press **Start** or **Listen**, or start the bite check, wowfish shows the windows that are open, each with its icon, title and a snapshot, and asks which one is the game. The one titled "World of Warcraft" comes first, but any window works, so a client in another language or with another title is fine. The bot watches that window, presses keys only while it is focused, and (on Linux and Windows) hears only the app that owns it. Nothing about the choice is saved.
+Every time you press **Start** or **Listen**, wowfish shows the windows that are open, each with its icon, title and a snapshot, and asks which one is the game. The one titled "World of Warcraft" comes first, but any window works, so a client in another language or with another title is fine. The bot watches that window, presses keys only while it is focused, and (on Linux and Windows) hears only the app that owns it. Nothing about the choice is saved.
 
 In the terminal, `run`, `listen` and `watch --live` print the same list with numbers: press Enter for the first window or type a number. A script can answer for you: `echo 1 | wowfish run`.
 

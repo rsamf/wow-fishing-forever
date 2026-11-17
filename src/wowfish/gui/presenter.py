@@ -1,5 +1,5 @@
 """Turns engine events into the words the console prints and the GUI shows, and owns the
-engine thread and the setup workers (meter, bite recording). No Tk here."""
+engine thread and the Setup tab's audio meter. No Tk here."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-import numpy as np
 from loguru import logger
 
 from wowfish.audio import AudioChunk, AudioUnavailable
@@ -72,12 +71,7 @@ def describe(event: ev.Event) -> str:
     return type(event).__name__
 
 
-# -- results of the setup workers ---------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class VerifyDone:
-    report: Any  # audio.verify.BiteReport
+# -- results of the Setup tab's meter -------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -111,8 +105,7 @@ class View:
     new_lines: list[str] = field(default_factory=list)
     log_events: list[object] = field(default_factory=list)
     trace: ScoreTrace = field(default_factory=ScoreTrace)
-    listening: bool = False  # the meter or the bite recording is reading audio
-    verify_status: str = ""  # what the bite recording is doing; empty when idle
+    listening: bool = False  # the meter is reading audio
 
 
 class _Meter:
@@ -172,9 +165,6 @@ class Presenter:
         self.thumbnail_png: bytes | None = None
         self._before_pause: tuple[str, str, str] | None = None
         self.trace = ScoreTrace()
-        # Written by the setup workers, read by the GUI tick.
-        self.verify_status = ""
-        self._record_level: float | None = None
 
     # -- config -----------------------------------------------------------------------------
 
@@ -326,8 +316,7 @@ class Presenter:
         return View(
             self.state, self.did, self.next, self.stats, self.thumbnail_png, self.running,
             self.level_dbfs, self.last_scores, lines, items, self.trace,
-            listening=self.meter_running or self._record_level is not None,
-            verify_status=self.verify_status,
+            listening=self.meter_running,
         )  # fmt: skip
 
     def _add_scores(self, event: ev.Scores) -> None:
@@ -368,79 +357,14 @@ class Presenter:
 
     def _describe_result(self, item: object) -> str:
         match item:
-            case VerifyDone(report=r):
-                if r.stands_out:
-                    lo = min(b.score for b in r.bites)
-                    hi = max(b.score for b in r.bites)
-                    return (
-                        f"Bite check: {len(r.bites)} bite(s) scoring {lo:.2f}-{hi:.2f}, "
-                        f"everything else at most {r.floor:.2f}; suggested threshold "
-                        f"{r.threshold:.2f}"
-                    )
-                return (
-                    f"Bite check: no bite stood out (everything at most {r.floor:.2f}); try again"
-                )
             case WorkerFailed(what=what, message=message):
                 return f"Cannot {what}: {message}"
         return str(item)
 
-    # -- setup workers ----------------------------------------------------------------------
-
-    def record_and_verify(
-        self, seconds: float = 60.0, window: Any = None, device: str | None = None
-    ) -> None:
-        threading.Thread(
-            target=self._verify_worker,
-            args=(seconds, window, device),
-            name="wowfish-verify",
-            daemon=True,
-        ).start()
-
-    def _verify_worker(self, seconds: float, window: Any, device: str | None) -> None:
-        from wowfish.audio.clips import build_fingerprints
-        from wowfish.audio.features import DEFAULT_MEL
-        from wowfish.audio.verify import bite_report, score_recording
-
-        result: object
-        try:
-            self.verify_status = "Opening the game's audio..."
-            source = self._open_audio(window, device)
-            chunks: list[np.ndarray] = []
-            frames = 0
-            with source:
-                total = int(seconds * source.sample_rate)
-                while frames < total:
-                    samples = source.read(BLOCK)
-                    chunks.append(samples)
-                    frames += len(samples)
-                    if len(samples):
-                        rms = float(np.sqrt(np.mean(np.square(samples))))
-                        self._record_level = 20.0 * np.log10(rms + 1e-9)
-                    left = (total - frames) / source.sample_rate
-                    self.verify_status = (
-                        f"Recording: {left:.0f} s left. "
-                        "Fish by hand in the game until a fish bites."
-                    )
-                    if getattr(source, "exhausted", False):
-                        break
-            self._record_level = None
-            self.verify_status = "Recorded; looking for the splash..."
-            y = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
-            fps = build_fingerprints()
-            scores = score_recording(y, source.sample_rate, fps, DEFAULT_MEL)
-            report = bite_report(scores, fps, DEFAULT_MEL)
-            result = VerifyDone(report)
-        except Exception as e:
-            result = WorkerFailed("verify the bite", str(e))
-        finally:
-            self._record_level = None
-            self.verify_status = ""  # before the result, so the result's words stay up
-        self._results.put(result)
+    # -- the audio meter --------------------------------------------------------------------
 
     @property
     def level_dbfs(self) -> float:
-        if self._record_level is not None:
-            return self._record_level
         return self._meter.level_dbfs if self._meter is not None else -120.0
 
     @property

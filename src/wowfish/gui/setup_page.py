@@ -1,4 +1,4 @@
-"""Setup tab: prerequisites, keys, audio with a live meter, bite check."""
+"""Setup tab: prerequisites, keys, audio with a live meter."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ from typing import Any
 
 from wowfish.gui.presenter import (
     Presenter,
-    VerifyDone,
     View,
     WorkerFailed,
 )
@@ -21,14 +20,12 @@ CHECKLIST = (
     "  5. Set Ambience and Music to 0 so the splash is easy to hear.\n"
     "  6. Optional: put a macro with /quit on an action bar key and enter it as the quit key;\n"
     "     when the time limit below runs out, the bot presses it to close the game.\n"
-    "Then press Start on the Fish tab. The first cast of every run measures the gear icon, so\n"
-    "the bite check below is optional: use it when the bot misses splashes."
+    "Then press Start on the Fish tab. Nothing below needs setting up first."
 )
 LURE_HINT = (
     "Optional. A macro like /use Shiny Bauble + /use 16 that puts a lure on the pole; it is "
     "pressed before the first cast and again whenever the lure runs out. Empty = no lure."
 )
-VERIFY_HINT = "Click, then fish by hand in the game until a fish bites (it records for 60 s)."
 
 
 class SetupPage:
@@ -81,7 +78,7 @@ class SetupPage:
         self.limit_note = tb.Label(limit, text="")
         self.limit_note.pack(side="left")
 
-        audio = tb.Labelframe(f, text="Audio (what the bot hears) and bite check", padding=8)
+        audio = tb.Labelframe(f, text="Audio (what the bot hears)", padding=8)
         audio.pack(fill="x", pady=4)
         self.devices = presenter.audio_devices()
         self._heard: Any = None  # the window the meter is on (Linux, Windows)
@@ -117,13 +114,6 @@ class SetupPage:
         self.level_text = tb.Label(audio, text="")
         self._meter_error = ""
         self.level_text.grid(row=1, column=3, sticky="w", padx=6, pady=(8, 0))
-        self.verify_button = tb.Button(
-            audio, text="Record 60 s and check the bite", command=self._verify, bootstyle="info"
-        )
-        self.verify_button.grid(row=2, column=0, sticky="w", pady=(8, 0))
-        self._meter_was_on = False
-        self.verify_note = tb.Label(audio, text=VERIFY_HINT, wraplength=560, justify="left")
-        self.verify_note.grid(row=2, column=1, columnspan=3, sticky="w", padx=6, pady=(8, 0))
         bite_row = tb.Frame(audio)
         bite_row.grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
         tb.Label(bite_row, text="Bite threshold").pack(side="left")
@@ -186,29 +176,6 @@ class SetupPage:
         self._meter_error = ""
         self.p.start_meter(window=window)
 
-    def _verify(self) -> None:
-        if not self.p.audio_follows_window:  # macOS: the input device, no window needed
-            self._record(None)
-            return
-        blocked = self._blocked()
-        if blocked:
-            self.verify_note.configure(text=blocked)
-            return
-        pick_window(self.frame, self._verify_with)
-
-    def _verify_with(self, window: Any) -> None:
-        if window is None:
-            self.verify_note.configure(text="No window picked; nothing recorded.")
-            return
-        self._record(window)
-
-    def _record(self, window: Any) -> None:
-        self._meter_was_on = self.p.meter_running
-        self.p.stop_meter()  # the recording shows its own level on the meter
-        self.verify_button.configure(state="disabled")
-        self.verify_note.configure(text="Starting the recording...")
-        self.p.record_and_verify(60.0, window=window, device=self._selected_device())
-
     def _save_bite(self) -> None:
         try:
             saved = self.p.save_bite_threshold(self.bite.get())
@@ -232,25 +199,7 @@ class SetupPage:
             score = f"   bite score {best:.2f}" if best is not None and best > -1.0 else ""
             heard = f"listening to {self._heard.title}: " if self._heard is not None else ""
             self.level_text.configure(text=heard + level + score)
-        if view.verify_status:
-            self.verify_note.configure(text=view.verify_status)
         for item, line in zip(view.log_events, view.new_lines, strict=True):
             match item:
-                case VerifyDone(report=report):
-                    self.verify_note.configure(text=line)
-                    if report.stands_out:  # suggest, but only Save changes the config
-                        self.bite.delete(0, "end")
-                        self.bite.insert(0, f"{report.threshold:.2f}")
-                        self.bite_note.configure(text="suggested by the bite check; Save to use it")
-                    self._verify_finished()
-                case WorkerFailed(what="verify the bite"):
-                    self.verify_note.configure(text=line)
-                    self._verify_finished()
                 case WorkerFailed():
                     self._meter_error = line
-
-    def _verify_finished(self) -> None:
-        self.verify_button.configure(state="normal")
-        if self._meter_was_on:
-            self._meter_was_on = False
-            self.p.start_meter(window=self._heard, device=self._selected_device())
