@@ -85,7 +85,7 @@ permissions, so a Mac needs a few one-time steps:
    Setup*, click **+** > *Create Multi-Output Device*, tick your speakers (or headphones) and
    BlackHole 2ch, and choose that device in *System Settings > Sound > Output*, so you still
    hear the game. wowfish listens to BlackHole by itself; to use another device, pick it on the
-   Setup tab and click *Use this and listen* (this sets `audio.device`). Without BlackHole or
+   Setup tab and click *Use this device* (this sets `audio.device`). Without BlackHole or
    another virtual device the bot does not start: it never falls back to the microphone.
 2. **Permissions.** macOS grants them to the app wowfish runs in: Terminal (double-clicking
    `wowfish-gui` opens it in Terminal too), or iTerm and the like. In *System Settings > Privacy
@@ -142,7 +142,7 @@ Or run it from terminal:
     wowfish config                      # creates the config file; edit cast_key / interact_key
     wowfish run                         # measures the icon on its first cast; Ctrl-C stops
 
-Every time you press **Start** or **Listen**, wowfish shows the windows that are open, each with its icon, title and a snapshot, and asks which one is the game. The one titled "World of Warcraft" comes first, but any window works, so a client in another language or with another title is fine. The bot watches that window, presses keys only while it is focused, and (on Linux and Windows) hears only the app that owns it. Nothing about the choice is saved.
+Every time you press **Start**, wowfish shows the windows that are open, each with its icon, title and a snapshot, and asks which one is the game. The one titled "World of Warcraft" comes first, but any window works, so a client in another language or with another title is fine. The bot watches that window, presses keys only while it is focused, and (on Linux and Windows) hears only the app that owns it. Nothing about the choice is saved.
 
 In the terminal, `wowfish run` prints the same list with numbers: press Enter for the first window or type a number. A script can answer for you: `echo 1 | wowfish run`.
 

@@ -1,25 +1,22 @@
 """Turns engine events into the words the console prints and the GUI shows, and owns the
-engine thread and the Setup tab's audio meter. No Tk here."""
+engine thread. No Tk here."""
 
 from __future__ import annotations
 
 import queue
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 from loguru import logger
 
-from wowfish.audio import AudioChunk, AudioUnavailable
+from wowfish.audio import AudioUnavailable
 from wowfish.config import Config, load_config, save_config
 from wowfish.engine import events as ev
 from wowfish.engine.state import State
 from wowfish.engine.thread import EngineThread
 from wowfish.gui import image
 from wowfish.input import keys
-
-BLOCK = 1024
 
 
 def describe(event: ev.Event) -> str:
@@ -71,7 +68,7 @@ def describe(event: ev.Event) -> str:
     return type(event).__name__
 
 
-# -- results of the Setup tab's meter -------------------------------------------------------------
+# -- what the GUI is told besides engine events ----------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -100,39 +97,9 @@ class View:
     stats: str
     thumbnail_png: bytes | None
     running: bool
-    level_dbfs: float
-    last_scores: dict[str, float]
     new_lines: list[str] = field(default_factory=list)
     log_events: list[object] = field(default_factory=list)
     trace: ScoreTrace = field(default_factory=ScoreTrace)
-    listening: bool = False  # the meter is reading audio
-
-
-class _Meter:
-    def __init__(self, source: Any, detector: Any) -> None:
-        self.source = source
-        self.detector = detector
-        self.level_dbfs = -120.0
-        self.scores: dict[str, float] = {}
-        self._stop = threading.Event()
-        self.thread = threading.Thread(target=self._run, name="wowfish-meter", daemon=True)
-
-    def start(self) -> None:
-        self.thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
-        self.thread.join(2.0)
-
-    def _run(self) -> None:
-        frames = 0
-        with self.source:
-            while not self._stop.is_set():
-                samples = self.source.read(BLOCK)
-                frames += len(samples)
-                self.detector.feed(AudioChunk(samples, self.source.sample_rate, frames / 22050))
-                self.level_dbfs = self.detector.level_dbfs
-                self.scores = {s.name: s.score for s in self.detector.last_scores}
 
 
 class Presenter:
@@ -141,21 +108,17 @@ class Presenter:
         *,
         build_engine: Callable[..., Any] | None = None,
         list_devices: Callable[[], list[Any]] | None = None,
-        open_game_audio: Callable[..., Any] | None = None,
     ) -> None:
         from wowfish.audio.devices import audio_follows_window, list_loopback_devices
-        from wowfish.audio.devices import open_game_audio as real_open
         from wowfish.engine.engine import build_engine as real_build
 
         self._build_engine = build_engine or real_build
         self._list_devices = list_devices or list_loopback_devices
-        self._open_game_audio = open_game_audio or real_open
         self.audio_follows_window: bool = audio_follows_window()
 
         self.cfg: Config = load_config()[0]
         self._results: queue.Queue[object] = queue.Queue()
         self._thread: EngineThread | None = None
-        self._meter: _Meter | None = None
         self.state = State.IDLE.name
         self.did = "Not started"
         self.next = "Press Start when the game is at the water"
@@ -211,10 +174,6 @@ class Presenter:
         """macOS: the input device the game's sound is routed into ("" = BlackHole or the like)."""
         save_config(replace(self.cfg, audio=replace(self.cfg.audio, device=device)))
         self.reload()
-
-    def _open_audio(self, window: Any, device: str | None) -> Any:
-        """The picked window's app; on macOS the input device (the saved one when None)."""
-        return self._open_game_audio(window, self.cfg.audio.device if device is None else device)
 
     def save_bite_threshold(self, value: str) -> float:
         """Check and save the bite threshold typed on the Setup tab; the bot uses it from the
@@ -280,7 +239,6 @@ class Presenter:
             self._thread.stop()
 
     def shutdown(self) -> None:
-        self.stop_meter()
         if self._thread is not None:
             self._thread.stop(timeout=3.0)
             self._thread = None
@@ -313,8 +271,7 @@ class Presenter:
             lines.append(self._describe_result(item))
         return View(
             self.state, self.did, self.next, self.stats, self.thumbnail_png, self.running,
-            self.level_dbfs, self.last_scores, lines, items, self.trace,
-            listening=self.meter_running,
+            lines, items, self.trace,
         )  # fmt: skip
 
     def _add_scores(self, event: ev.Scores) -> None:
@@ -358,35 +315,3 @@ class Presenter:
             case WorkerFailed(what=what, message=message):
                 return f"Cannot {what}: {message}"
         return str(item)
-
-    # -- the audio meter --------------------------------------------------------------------
-
-    @property
-    def level_dbfs(self) -> float:
-        return self._meter.level_dbfs if self._meter is not None else -120.0
-
-    @property
-    def last_scores(self) -> dict[str, float]:
-        return dict(self._meter.scores) if self._meter is not None else {}
-
-    @property
-    def meter_running(self) -> bool:
-        return self._meter is not None and self._meter.thread.is_alive()
-
-    def start_meter(self, window: Any = None, device: str | None = None) -> None:
-        from wowfish.audio.detector import detector_for
-
-        self.stop_meter()
-        try:
-            source = self._open_audio(window, device)
-        except Exception as e:
-            self._results.put(WorkerFailed("open the audio device", str(e)))
-            return
-        detector = detector_for(self.cfg.audio)
-        self._meter = _Meter(source, detector)
-        self._meter.start()
-
-    def stop_meter(self) -> None:
-        if self._meter is not None:
-            self._meter.stop()
-            self._meter = None

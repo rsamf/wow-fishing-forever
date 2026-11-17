@@ -1,4 +1,4 @@
-"""Setup tab: prerequisites, keys, audio with a live meter."""
+"""Setup tab: prerequisites, keys, time limit, audio settings."""
 
 from __future__ import annotations
 
@@ -7,9 +7,7 @@ from typing import Any
 from wowfish.gui.presenter import (
     Presenter,
     View,
-    WorkerFailed,
 )
-from wowfish.gui.window_picker import pick_window
 
 CHECKLIST = (
     "In the game, before starting:\n"
@@ -81,15 +79,10 @@ class SetupPage:
         audio = tb.Labelframe(f, text="Audio (what the bot hears)", padding=8)
         audio.pack(fill="x", pady=4)
         self.devices = presenter.audio_devices()
-        self._heard: Any = None  # the window the meter is on (Linux, Windows)
-        self._listen_label = "Listen" if presenter.audio_follows_window else "Use this and listen"
         if presenter.audio_follows_window:
             self.device = None
-            tb.Button(audio, text="Listen", command=self._listen, bootstyle="secondary").grid(
-                row=0, column=0, sticky="w"
-            )
-            tb.Label(audio, text="The bot hears only the app of the game window.").grid(
-                row=0, column=1, columnspan=3, sticky="w", padx=6
+            tb.Label(audio, text="The bot hears only the app of the game window you pick.").grid(
+                row=0, column=0, columnspan=4, sticky="w"
             )
         else:  # macOS: an input device carries the game's sound
             names = [d.name for d in self.devices]
@@ -106,14 +99,10 @@ class SetupPage:
                 self.device.current(pick)
             self.device.grid(row=0, column=0, columnspan=3, sticky="w")
             tb.Button(
-                audio, text="Use this and listen", command=self._save_device, bootstyle="secondary"
+                audio, text="Use this device", command=self._save_device, bootstyle="secondary"
             ).grid(row=0, column=3, padx=6)
-        tb.Label(audio, text="Level").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        self.meter = tb.Progressbar(audio, maximum=100, value=0, bootstyle="info", length=300)
-        self.meter.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 0))
-        self.level_text = tb.Label(audio, text="")
-        self._meter_error = ""
-        self.level_text.grid(row=1, column=3, sticky="w", padx=6, pady=(8, 0))
+            self.device_note = tb.Label(audio, text="The input device the game's sound goes to.")
+            self.device_note.grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
         bite_row = tb.Frame(audio)
         bite_row.grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
         tb.Label(bite_row, text="Bite threshold").pack(side="left")
@@ -156,25 +145,7 @@ class SetupPage:
         sel = self._selected_device()
         if sel is not None:
             self.p.save_audio_device(sel)
-            self._meter_error = ""
-            self.p.start_meter(device=sel)
-
-    def _blocked(self) -> str:
-        """Why no window can be picked right now (platform, macOS permission); "" when one can."""
-        return "; ".join(self.p.preflight(request=True))
-
-    def _listen(self) -> None:
-        self._meter_error = self._blocked()
-        if not self._meter_error:
-            pick_window(self.frame, self._listen_to)
-
-    def _listen_to(self, window: Any) -> None:
-        if window is None:
-            self._meter_error = "No window picked"
-            return
-        self._heard = window
-        self._meter_error = ""
-        self.p.start_meter(window=window)
+            self.device_note.configure(text=f"saved {sel}; used from the next Start")
 
     def _save_bite(self) -> None:
         try:
@@ -187,19 +158,4 @@ class SetupPage:
     # -- rendering --------------------------------------------------------------------------
 
     def render(self, view: View) -> None:
-        pct = max(0.0, min(100.0, (view.level_dbfs + 60.0) / 60.0 * 100.0))
-        self.meter.configure(value=pct)
-        if not view.listening:
-            self.level_text.configure(
-                text=self._meter_error or f"not listening (press {self._listen_label})"
-            )
-        else:
-            level = "silent" if view.level_dbfs <= -60 else f"{view.level_dbfs:5.1f} dBFS"
-            best = max(view.last_scores.values(), default=None)
-            score = f"   bite score {best:.2f}" if best is not None and best > -1.0 else ""
-            heard = f"listening to {self._heard.title}: " if self._heard is not None else ""
-            self.level_text.configure(text=heard + level + score)
-        for item, line in zip(view.log_events, view.new_lines, strict=True):
-            match item:
-                case WorkerFailed():
-                    self._meter_error = line
+        """Nothing on this tab changes while the bot runs."""
