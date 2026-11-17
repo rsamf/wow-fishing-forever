@@ -25,6 +25,7 @@ from wowfish.input import keys
 GAME_TITLE = "World of Warcraft"
 BLOCK = 1024
 CALIBRATE_WATCH_S = 30.0  # how long the calibration keeps grabbing frames for the gear icon
+CALIBRATE_REST_S = 0.1  # between those grabs, so the watch does not spin a CPU core
 
 
 def describe(event: ev.Event) -> str:
@@ -474,6 +475,7 @@ class Presenter:
                     )
                     if cal.valid or time.monotonic() >= deadline:
                         break
+                    time.sleep(CALIBRATE_REST_S)
             finally:
                 cap.close()
             thumb, scale = image.thumbnail(frame)

@@ -41,6 +41,7 @@ STATS_EVERY_S = 10.0
 LISTEN_EVERY_S = 2.0  # while waiting for the splash, say what is heard this often
 SCORES_EVERY_S = 0.1  # ...and send each clip's peak score this often, for the GUI's graph
 SLEEP_SLICE_S = 0.1
+TICK_S = 0.02  # rest between passes of the loop, so it does not spin a CPU core
 RESWEEP_AFTER_TIMEOUTS = 2  # icon timeouts in a row before the next cast measures the icon again
 JUMP_LANDING_S = (1.0, 1.5)  # Fishing cannot be cast mid-air; wait this long after a jump
 QUIT_WAIT_S = 30.0  # away from an inn, /quit counts down 20 s before the game closes
@@ -190,6 +191,7 @@ class FishingEngine:
         elif self.state is State.INTERACT:
             self._after_interact(now)
         self._maybe_stats(now)
+        self._sleep(TICK_S)
 
     def _cast(self, now: float) -> None:
         if self._lure_due(now):
