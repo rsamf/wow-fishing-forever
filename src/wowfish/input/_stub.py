@@ -10,3 +10,12 @@ class StubInputDevice:
 
     def is_game_focused(self, window: WindowRef) -> bool | None:
         return None
+
+    def current_focus(self) -> object | None:
+        return None
+
+    def focus_window(self, window: WindowRef) -> None:
+        pass
+
+    def restore_focus(self, token: object | None) -> None:
+        pass

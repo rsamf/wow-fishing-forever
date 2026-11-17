@@ -13,6 +13,7 @@ from wowfish.input.keys import VK_CODES, is_supported_key, normalize_key
 INPUT_KEYBOARD = 1
 KEYEVENTF_SCANCODE = 0x0008
 KEYEVENTF_KEYUP = 0x0002
+VK_MENU = 0x12  # Alt
 ULONG_PTR = ctypes.c_size_t
 
 
@@ -75,3 +76,30 @@ class Win32InputDevice:
         if window.handle is None:
             return None
         return (self._u.GetForegroundWindow() or 0) == int(window.handle)
+
+    # -- focus ------------------------------------------------------------------------------
+
+    def _set_foreground(self, hwnd: int) -> None:
+        """SetForegroundWindow, and once more after an Alt tap when Windows turns it down: it
+        only lets a process that just received input change the foreground window."""
+        u = self._u
+        u.SetForegroundWindow.argtypes = [wintypes.HWND]
+        u.SetForegroundWindow(hwnd)
+        if int(u.GetForegroundWindow() or 0) == int(hwnd):
+            return
+        for flags in (0, KEYEVENTF_KEYUP):
+            inp = _INPUT(type=INPUT_KEYBOARD)
+            inp.u.ki = _KEYBDINPUT(VK_MENU, 0, flags, 0, 0)
+            u.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+        u.SetForegroundWindow(hwnd)
+
+    def current_focus(self) -> object | None:
+        return int(self._u.GetForegroundWindow() or 0) or None
+
+    def focus_window(self, window: WindowRef) -> None:
+        if window.handle is not None:
+            self._set_foreground(window.handle)
+
+    def restore_focus(self, token: object | None) -> None:
+        if isinstance(token, int):
+            self._set_foreground(token)

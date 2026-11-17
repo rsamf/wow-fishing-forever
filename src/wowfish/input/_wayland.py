@@ -13,6 +13,7 @@ not justify a libwayland binding.
 from __future__ import annotations
 
 import array
+import contextlib
 import mmap
 import os
 import re
@@ -287,6 +288,45 @@ class WaylandInputDevice:
                 return None
             self._focus = (now, active)
         return active == window.handle
+
+    def current_focus(self) -> object | None:
+        return hyprland_current_focus()
+
+    def focus_window(self, window: WindowRef) -> None:
+        hyprland_focus_window(window)
+        self._focus = (-1.0, None)  # ask the compositor afresh
+
+    def restore_focus(self, token: object | None) -> None:
+        hyprland_restore_focus(token)
+        self._focus = (-1.0, None)
+
+
+def hyprland_current_focus() -> object | None:
+    from wowfish.capture._wayland import active_window_hyprland
+
+    try:
+        return active_window_hyprland()
+    except Exception:
+        return None
+
+
+def hyprland_focus_window(window: WindowRef) -> None:
+    from wowfish.capture._wayland import focus_hyprland, hyprland_address
+
+    try:
+        address = hyprland_address(window)
+        if address is not None:
+            focus_hyprland(address)
+    except Exception:
+        pass  # the engine checks is_game_focused and pauses when focus did not move
+
+
+def hyprland_restore_focus(token: object | None) -> None:
+    from wowfish.capture._wayland import focus_hyprland
+
+    if isinstance(token, int):
+        with contextlib.suppress(Exception):
+            focus_hyprland(token)
 
 
 def virtual_keyboard_available() -> tuple[bool, str]:

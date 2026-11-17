@@ -192,6 +192,33 @@ def icon_hyprland(window: WindowRef, size: int) -> np.ndarray | None:
     return None
 
 
+def hyprland_dispatch(dispatcher: str) -> None:
+    """Run a Hyprland dispatcher such as "focuswindow address:0x2a" (`hyprctl dispatch`)."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(2.0)
+        s.connect(_hyprland_socket())
+        s.sendall(f"/dispatch {dispatcher}".encode())
+        while s.recv(4096):
+            pass
+
+
+def focus_hyprland(address: int) -> None:
+    hyprland_dispatch(f"focuswindow address:{address:#x}")
+
+
+def hyprland_address(window: WindowRef) -> int | None:
+    """The window's Hyprland address: its handle when native, else the Xwayland client with its
+    pid (and title, when several share the pid)."""
+    if window.compositor == "hyprland":
+        return window.handle
+    owned = [
+        c for c in hyprland_request("clients") if c.get("xwayland") and c.get("pid") == window.pid
+    ]
+    titled = [c for c in owned if c.get("title") == window.title]
+    client = (titled or owned or [None])[0]
+    return int(str(client["address"]), 16) if client else None
+
+
 def active_window_hyprland() -> int | None:
     """The address of the window with keyboard focus, or None when nothing has it."""
     address = hyprland_request("activewindow").get("address")

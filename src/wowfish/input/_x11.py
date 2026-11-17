@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 from typing import Any
 
-from wowfish.capture import WindowRef
+from wowfish.capture import WindowRef, linux_hyprland
 from wowfish.errors import InputUnavailable
+from wowfish.input._wayland import (
+    hyprland_current_focus,
+    hyprland_focus_window,
+    hyprland_restore_focus,
+)
 from wowfish.input.keys import X11_NAMES, is_supported_key, normalize_key
+
+ALT_TAB_STEP_S = 0.05  # between the four key events of an Alt+Tab
 
 
 def _open_display() -> Any:
@@ -88,3 +96,76 @@ class X11InputDevice:
                 return False  # reached the root (python-xlib gives an int there)
             w = parent
         return False
+
+    # -- focus ------------------------------------------------------------------------------
+
+    def _root_ids(self, atom_name: str) -> list[int]:
+        from Xlib import X
+
+        try:
+            root = self._d.screen().root
+            prop = root.get_full_property(self._d.intern_atom(atom_name), X.AnyPropertyType)
+        except Exception:
+            return []
+        return [int(v) for v in prop.value] if prop is not None else []
+
+    def _activate(self, window_id: int) -> None:
+        """Ask the window manager to focus a window (_NET_ACTIVE_WINDOW, as a pager would: an
+        application's own request can be turned down as focus stealing)."""
+        from Xlib import X, protocol
+
+        root = self._d.screen().root
+        atom = self._d.intern_atom("_NET_ACTIVE_WINDOW")
+        event = protocol.event.ClientMessage(
+            window=self._d.create_resource_object("window", window_id),
+            client_type=atom,
+            data=(32, [2, X.CurrentTime, 0, 0, 0]),
+        )
+        root.send_event(event, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+        self._d.sync()
+
+    def _alt_tab(self) -> None:
+        from Xlib import XK, X
+        from Xlib.ext import xtest
+
+        alt = self._d.keysym_to_keycode(XK.string_to_keysym("Alt_L"))
+        tab = self._d.keysym_to_keycode(XK.string_to_keysym("Tab"))
+        for kind, code in (
+            (X.KeyPress, alt),
+            (X.KeyPress, tab),
+            (X.KeyRelease, tab),
+            (X.KeyRelease, alt),
+        ):
+            xtest.fake_input(self._d, kind, code)
+            self._d.sync()
+            time.sleep(ALT_TAB_STEP_S)
+
+    def current_focus(self) -> object | None:
+        if linux_hyprland():
+            return hyprland_current_focus()
+        return next(iter(self._root_ids("_NET_ACTIVE_WINDOW")), None)
+
+    def focus_window(self, window: WindowRef) -> None:
+        if linux_hyprland():
+            hyprland_focus_window(window)
+        elif window.handle is not None:
+            # the engine checks is_game_focused and pauses when focus did not move
+            with contextlib.suppress(Exception):
+                self._activate(window.handle)
+
+    def restore_focus(self, token: object | None) -> None:
+        """Back to the window that had focus. Under Xwayland a native Wayland app cannot be
+        named from here (the window manager reports a placeholder), so Alt+Tab goes back to it:
+        it was the window in front just before the game."""
+        if linux_hyprland():
+            hyprland_restore_focus(token)
+            return
+        if not isinstance(token, int):
+            return
+        try:
+            if token in self._root_ids("_NET_CLIENT_LIST"):
+                self._activate(token)
+            elif os.environ.get("WAYLAND_DISPLAY"):
+                self._alt_tab()
+        except Exception:
+            pass

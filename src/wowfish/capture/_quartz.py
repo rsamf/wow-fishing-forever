@@ -296,6 +296,46 @@ def icon_quartz(pid: int, size: int) -> Any:
         send(pool, "drain")
 
 
+def activate_app(pid: int) -> bool:
+    """Bring the app with this pid to the front (all of it: macOS focuses apps, not windows)."""
+    if sys.platform != "darwin":
+        return False
+    objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+    ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+    vp = ctypes.c_void_p
+    objc.objc_getClass.argtypes, objc.objc_getClass.restype = [ctypes.c_char_p], vp
+    objc.sel_registerName.argtypes, objc.sel_registerName.restype = [ctypes.c_char_p], vp
+
+    def send(
+        obj: Any, selector: str, *args: Any, types: tuple[Any, ...] = (), res: Any = vp
+    ) -> Any:
+        fn = ctypes.cast(objc.objc_msgSend, ctypes.CFUNCTYPE(res, vp, vp, *types))
+        return fn(obj, objc.sel_registerName(selector.encode()), *args)
+
+    pool = send(objc.objc_getClass(b"NSAutoreleasePool"), "new")
+    try:
+        app = send(
+            objc.objc_getClass(b"NSRunningApplication"),
+            "runningApplicationWithProcessIdentifier:",
+            pid,
+            types=(ctypes.c_int,),
+        )
+        if not app:
+            return False
+        ignoring_other_apps = 1 << 1  # NSApplicationActivateIgnoringOtherApps
+        return bool(
+            send(
+                app,
+                "activateWithOptions:",
+                ignoring_other_apps,
+                types=(ctypes.c_ulong,),
+                res=ctypes.c_bool,
+            )
+        )
+    finally:
+        send(pool, "drain")
+
+
 def screen_capture_available(request: bool = False) -> tuple[bool, str]:
     """Whether macOS lets this process see other apps' windows; `request` shows its prompt."""
     cg, _ = frameworks()

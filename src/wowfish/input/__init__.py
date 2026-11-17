@@ -17,6 +17,19 @@ class InputDevice(Protocol):
         """True/False when the backend can tell which window has keyboard focus, else None."""
         ...
 
+    def current_focus(self) -> object | None:
+        """A token for whatever has keyboard focus now, to hand to restore_focus later."""
+        ...
+
+    def focus_window(self, window: WindowRef) -> None:
+        """Ask the system to give the game keyboard focus. It may refuse: check
+        is_game_focused before pressing anything."""
+        ...
+
+    def restore_focus(self, token: object | None) -> None:
+        """Give focus back to what current_focus saw. Best effort."""
+        ...
+
 
 def get_input_device(window: WindowRef | None = None) -> InputDevice:
     """Key presses for `window`: a native Wayland window needs the compositor's virtual keyboard."""
