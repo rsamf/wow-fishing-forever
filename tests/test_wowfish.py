@@ -576,7 +576,10 @@ class _Pond:
         self.window = WindowRef("World of Warcraft", None, 0, 0, 10, 10, handle=1)
         self.moves: list[tuple[float, WindowRef | None]] = []  # (from when, what refresh finds)
         self.opened: list[WindowRef] = []
-        self.focused = True
+        self.front = "game"  # which window has keyboard focus
+        self.refuse_focus = False  # the system turns focus requests down
+        self.focus_log: list[object] = []  # every focus change the bot made, in order
+        self.pressed_into: list[str] = []  # the window in front at each key press
         self.pressed: list[tuple[float, str, float]] = []  # time, key, hold
         self.bites: list[float] = []
         self.cleared: list[float] = []  # when the engine dropped the buffered audio
@@ -601,6 +604,7 @@ class _Pond:
 
     def press_key(self, key: str, hold_s: float) -> None:
         self.pressed.append((self.t, key, hold_s))
+        self.pressed_into.append(self.front)
         if key in ("1", "f"):
             self.bobber = key == "1"
             self.cast_at = self.t
@@ -618,8 +622,29 @@ class _Pond:
                 found = moved
         return found
 
+    @property
+    def focused(self) -> bool:
+        return self.front == "game"
+
+    @focused.setter
+    def focused(self, value: bool) -> None:  # False: somewhere else, and it stays there
+        self.front = "game" if value else "elsewhere"
+        self.refuse_focus = not value
+
     def is_game_focused(self, window) -> bool:
-        return self.focused
+        return self.front == "game"
+
+    def current_focus(self) -> object:
+        return self.front
+
+    def focus_window(self, window) -> None:
+        if not self.refuse_focus:
+            self.front = "game"
+            self.focus_log.append("game")
+
+    def restore_focus(self, token) -> None:
+        self.front = token
+        self.focus_log.append(token)
 
     def read(self, n: int) -> np.ndarray:
         self.t += 0.01
@@ -644,11 +669,12 @@ def _fish(
     minutes: float,
     game: GameConfig | None = None,
     pond: _Pond | None = None,
+    run: RunConfig | None = None,
 ) -> tuple[_Pond, list[str]]:
     """Fish for `minutes`, or until the session limit in `game` stops the engine."""
     pond = pond or _Pond()
     cfg = Config(game=game or GameConfig(), vision=VisionConfig(), audio=AudioConfig(),
-                 behavior=behavior)  # fmt: skip
+                 run=run or RunConfig(), behavior=behavior)  # fmt: skip
     engine = FishingEngine(
         cfg, pond.window,
         capturer=pond, input_device=pond, audio_source=pond, detector=pond, matcher=pond,
@@ -720,6 +746,35 @@ def test_engine_follows_the_window_it_was_given():
     pond.focused = False
     _, lines = _fish(BehaviorConfig(), 1, pond=pond)
     assert "Paused: Mundo de Warcraft is not the focused window; click into the game" in lines
+
+
+def test_background_fishing_borrows_focus_and_gives_it_back():
+    """With run.background on and another window in front, the bot takes focus for one trip per
+    fish (Interact, loot, the next cast) and hands it back to that window; no key is ever pressed
+    into anything but the game. A refused focus request pauses and presses nothing. A user who
+    is in the game is left alone. With it off, a run still asks for focus once at the start."""
+    on = RunConfig(background=True)
+    pond = _Pond(bite_after_s=5)
+    pond.front = "editor"
+    pond, lines = _fish(BehaviorConfig(), 3, pond=pond, run=on)
+    keys = [k for _, k, _ in pond.pressed]
+    assert keys.count("f") > 5 and set(pond.pressed_into) == {"game"}
+    assert pond.focus_log[:4] == ["game", "editor", "game", "editor"] and pond.front == "editor"
+    assert pond.focus_log.count("game") == keys.count("1")  # one trip per cast, Interact included
+    assert not any(line.startswith("Paused") for line in lines)
+
+    pond = _Pond()
+    pond.focused = False
+    pond, lines = _fish(BehaviorConfig(), 1, pond=pond, run=on)
+    assert pond.pressed == [] and any(line.startswith("Paused") for line in lines)
+
+    pond, _ = _fish(BehaviorConfig(), 1, run=on)
+    assert pond.focus_log == [] and len(pond.pressed) > 5
+
+    pond = _Pond()
+    pond.front = "editor"
+    pond, lines = _fish(BehaviorConfig(), 1, pond=pond)
+    assert pond.focus_log == ["game"] and len(pond.pressed) > 5  # off: focus once, at the start
 
 
 def test_background_help_tells_hyprland_users_the_catch():

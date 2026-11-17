@@ -43,6 +43,7 @@ TICK_S = 0.02  # rest between passes of the loop, so it does not spin a CPU core
 RESWEEP_AFTER_TIMEOUTS = 2  # icon timeouts in a row before the next cast measures the icon again
 JUMP_LANDING_S = (1.0, 1.5)  # Fishing cannot be cast mid-air; wait this long after a jump
 QUIT_WAIT_S = 30.0  # away from an inn, /quit counts down 20 s before the game closes
+FOCUS_WAIT_S = 1.0  # how long a focus request gets before it counts as turned down
 QUIT_TRIES = 3  # quit key presses before giving up on closing the game
 BUSY = (State.CASTING, State.WAIT_BITE, State.INTERACT)  # a cast in hand
 
@@ -105,7 +106,10 @@ class FishingEngine:
         self.stats = ev.Stats(0.0)
         self.started: float | None = None
         self._stop = False
+        self._asked_focus = False
         self._resume_state = State.IDLE
+        self._borrowed = False  # the bot took focus from another window and owes it back
+        self._focus_token: object | None = None  # ...and this is what had it
         self._t_cast = 0.0
         self._t_interact = 0.0
         self._icon_xy: tuple[int, int] | None = None
@@ -163,12 +167,17 @@ class FishingEngine:
     # -- the loop body -----------------------------------------------------------------------
 
     def _step(self, now: float) -> None:
+        background = self.cfg.run.background
+        if not self._asked_focus:  # every run starts by bringing the game to the front
+            self._asked_focus = True
+            self._borrow_focus()
+            if not background:
+                self._borrowed = False  # nothing to give back: the bot stays in the game
         focused = self.input.is_game_focused(self.window)
-        if focused is False:
-            if self.state is not State.PAUSED:
-                self._resume_state = self.state
-                self.state = State.PAUSED
-                self._emit(ev.Paused(self._t(), unfocused(self.window.title)))
+        # In the background only the key presses need focus (taken when one is due); once a
+        # request was turned down the bot waits, paused, for the user to click into the game.
+        if focused is False and (not background or self.state is State.PAUSED):
+            self._pause(self.state)
             self._drain_audio(now)
             self._sleep(SLEEP_SLICE_S)
             return
@@ -185,6 +194,9 @@ class FishingEngine:
             self._send_scores(now, flush=bool(bites))  # flush so the graph gets the bite's peak
 
         if self.state is State.IDLE:
+            if background and not self._borrow_focus():
+                self._pause(State.IDLE)
+                return
             self._cast(now)
         elif self.state is State.CASTING:
             self._acquire(now)
@@ -194,6 +206,43 @@ class FishingEngine:
             self._after_interact(now)
         self._maybe_stats(now)
         self._sleep(TICK_S)
+
+    # -- focus --------------------------------------------------------------------------------
+
+    def _game_in_front(self) -> bool:
+        return self.input.is_game_focused(self.window) is not False
+
+    def _pause(self, resume: State) -> None:
+        """Wait for the user to click into the game; `resume` is the state to pick up in."""
+        if self.state is State.PAUSED:
+            return
+        self._resume_state = resume
+        self.state = State.PAUSED
+        self._emit(ev.Paused(self._t(), unfocused(self.window.title)))
+
+    def _borrow_focus(self) -> bool:
+        """Bring the game to the front for a key press, remembering which window had focus.
+        False when the system turned the request down: nothing may be pressed then."""
+        if self.input.is_game_focused(self.window) is not False:
+            return True
+        token = self.input.current_focus()
+        self.input.focus_window(self.window)
+        deadline = self._clock() + FOCUS_WAIT_S
+        while self.input.is_game_focused(self.window) is False:
+            if self._stop or self._clock() >= deadline:
+                return False
+            self._sleep(TICK_S)
+        if not self._borrowed:
+            self._borrowed, self._focus_token = True, token
+        return True
+
+    def _return_focus(self) -> None:
+        """Hand focus back to the window it was borrowed from, unless the user has moved on."""
+        if not self._borrowed:
+            return
+        token, self._borrowed, self._focus_token = self._focus_token, False, None
+        if self.input.is_game_focused(self.window) is True:
+            self.input.restore_focus(token)
 
     def _follow_window(self) -> None:
         """Look at the picked window again: capture moves with it, and a new size means a new
@@ -232,6 +281,7 @@ class FishingEngine:
         if clear is not None:  # a pause, break, or jump left audio queued; hear this cast live
             clear()
         self._press(key, "cast")
+        self._return_focus()  # the trip is over: the next key press is at the next splash
         self.stats = ev.Stats(
             self._t(), self.stats.casts + 1, self.stats.catches, self.stats.misses,
             self.stats.bites_heard, self._elapsed(),
@@ -307,10 +357,8 @@ class FishingEngine:
             self._wait(self.behavior.reaction_s())
             if self._stop:
                 return
-            if self.input.is_game_focused(self.window) is False:
-                self._resume_state = State.WAIT_BITE
-                self.state = State.PAUSED
-                self._emit(ev.Paused(self._t(), unfocused(self.window.title)))
+            if not (self._borrow_focus() if self.cfg.run.background else self._game_in_front()):
+                self._pause(State.WAIT_BITE)
                 return
             key = self.cfg.game.interact_key
             self._press(key, "bite")
@@ -400,6 +448,8 @@ class FishingEngine:
         if not key:
             return
         try:
+            if self.cfg.run.background:
+                self._borrow_focus()
             for _ in range(QUIT_TRIES):
                 if self.input.is_game_focused(self.window) is False:
                     self._emit(
@@ -417,6 +467,7 @@ class FishingEngine:
                     f"Waiting up to {QUIT_WAIT_S:g} s for the game to close",
                 )
                 if self._wait_for_game_to_close(find):
+                    self._borrowed = False  # no game left to switch away from
                     self._change(State.IDLE, "The game closed", "Stopping")
                     return
                 if self._stop:
@@ -466,6 +517,8 @@ class FishingEngine:
             nxt = f"Casting again in {pause:.1f} s"
         self._change(State.IDLE, did, nxt)
         self._icon_xy = None
+        if rest > 0:
+            self._return_focus()  # not held through a break; the next cast takes it again
         self._wait(rest + pause)
 
     def _wait(self, seconds: float) -> None:
@@ -527,6 +580,7 @@ class FishingEngine:
     def _finish(self, reason: str) -> None:
         if self.state is State.STOPPED:
             return
+        self._return_focus()
         self._emit_stats()
         self.state = State.STOPPED
         self._emit(ev.Stopped(self._t(), reason))
