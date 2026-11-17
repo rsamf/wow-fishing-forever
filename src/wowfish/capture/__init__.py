@@ -12,6 +12,8 @@ import numpy as np
 from wowfish.errors import NotSupported
 
 Box = tuple[int, int, int, int]  # x, y, width, height in window pixels
+GAME_TITLE = "World of Warcraft"  # only ever a guess: the user picks the window
+MIN_SIDE_PX = 50  # smaller windows (tooltips, tray icons) are not offered
 
 
 @dataclass(frozen=True)
@@ -50,8 +52,56 @@ def macos() -> bool:
     return sys.platform == "darwin"
 
 
-def find_window(title_substring: str = "World of Warcraft") -> WindowRef | None:
-    """The largest viewable window whose title contains the text.
+def same_window(a: WindowRef, b: WindowRef) -> bool:
+    """Whether two refs name one window, wherever it has moved to since."""
+    if a.handle is not None:
+        return (a.handle, a.compositor) == (b.handle, b.compositor)
+    return a == b
+
+
+def _platform_windows() -> list[WindowRef]:
+    """Every window the platform lists, in its own order."""
+    if linux_hyprland():
+        from wowfish.capture._wayland import list_windows_hyprland
+
+        try:
+            found = list_windows_hyprland()
+        except (NotSupported, OSError, ValueError):
+            if not linux_x11():
+                raise
+            found = []
+        if linux_x11():
+            from wowfish.capture._x11 import list_windows_x11
+
+            found += list_windows_x11()
+        return found
+    if linux_x11():
+        from wowfish.capture._x11 import list_windows_x11
+
+        return list_windows_x11()
+    if sys.platform == "win32":
+        from wowfish.capture import _win32
+
+        return _win32.list_windows_win32()
+    if macos():
+        from wowfish.capture._quartz import list_windows_quartz
+
+        return list_windows_quartz()
+    return []
+
+
+def list_windows() -> list[WindowRef]:
+    """The windows a user can pick: titled, big enough to be an app's, and not wowfish's own."""
+    own = os.getpid()
+    return [
+        w
+        for w in _platform_windows()
+        if w.pid != own and w.title.strip() and min(w.width, w.height) >= MIN_SIDE_PX
+    ]
+
+
+def find_window(title_substring: str = GAME_TITLE) -> WindowRef | None:
+    """The largest viewable window whose title contains the text: the picker's first guess.
 
     On Hyprland the compositor picks it from all its windows, native Wayland and Xwayland alike;
     an Xwayland winner is then looked up through X11 by its pid. Elsewhere X11, then Windows,
@@ -107,6 +157,8 @@ def get_capturer(window: WindowRef | None = None) -> Capturer:
 
 
 __all__ = [
+    "GAME_TITLE",
+    "MIN_SIDE_PX",
     "Box",
     "Capturer",
     "WindowRef",
@@ -114,5 +166,7 @@ __all__ = [
     "get_capturer",
     "linux_hyprland",
     "linux_x11",
+    "list_windows",
     "macos",
+    "same_window",
 ]

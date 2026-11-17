@@ -104,44 +104,40 @@ def _xres_pid(d: Any, window: int) -> int | None:
     return next((int(i.value[0]) for i in reply.ids if i.value), None)
 
 
-def find_window_x11(title_substring: str, pid: int | None = None) -> WindowRef | None:
-    """The largest viewable match, among those of process `pid` when any of them is.
+def _titled_windows(d: Any) -> list[WindowRef]:
+    """Every viewable window with a title, minus window-manager frames around a titled client."""
+    from Xlib import X
 
-    Hyprland reports a pid from _NET_WM_PID or from the X server's record, and the two differ
-    when the game runs in a container with its own pid namespace, so either one counts.
-    """
-    from Xlib import X, display
+    root = d.screen().root
+    name_atom = d.intern_atom("_NET_WM_NAME")
+    pid_atom = d.intern_atom("_NET_WM_PID")
+    matches: list[tuple[WindowRef, list[int]]] = []  # (ref, ancestor ids)
 
-    d = display.Display()
-    try:
-        root = d.screen().root
-        name_atom = d.intern_atom("_NET_WM_NAME")
-        pid_atom = d.intern_atom("_NET_WM_PID")
-        wanted = title_substring.lower()
-        matches: list[tuple[WindowRef, list[int]]] = []  # (ref, ancestor ids)
+    def title_of(w: Any) -> str:
+        try:
+            prop = w.get_full_property(name_atom, 0)
+            if prop and prop.value:
+                return bytes(prop.value).decode("utf-8", "replace")
+            name = w.get_wm_name()
+            if isinstance(name, str):
+                return name
+            return (name or b"").decode("utf-8", "replace")
+        except Exception:
+            return ""
 
-        def title_of(w: Any) -> str:
-            try:
-                prop = w.get_full_property(name_atom, 0)
-                if prop and prop.value:
-                    return bytes(prop.value).decode("utf-8", "replace")
-                name = w.get_wm_name()
-                if isinstance(name, str):
-                    return name
-                return (name or b"").decode("utf-8", "replace")
-            except Exception:
-                return ""
-
-        def visit(w: Any, ancestors: list[int]) -> None:
-            for child in w.query_tree().children:
-                title = title_of(child)
-                if title and wanted in title.lower():
-                    try:
-                        attrs = child.get_attributes()
-                        geo = child.get_geometry()
-                    except Exception:
-                        continue
-                    if attrs.map_state == X.IsViewable:
+    def visit(w: Any, ancestors: list[int]) -> None:
+        try:
+            children = w.query_tree().children
+        except Exception:  # the window went away mid-walk
+            return
+        for child in children:
+            title = title_of(child)
+            if title:
+                try:
+                    attrs = child.get_attributes()
+                    geo = child.get_geometry()
+                    # InputOnly windows draw nothing (e.g. mutter's guard window)
+                    if attrs.map_state == X.IsViewable and attrs.win_class != X.InputOnly:
                         origin = root.translate_coords(child, 0, 0)
                         pid_prop = child.get_full_property(pid_atom, 0)
                         wm_pid = int(pid_prop.value[0]) if pid_prop and pid_prop.value else None
@@ -149,12 +145,45 @@ def find_window_x11(title_substring: str, pid: int | None = None) -> WindowRef |
                             title, wm_pid, origin.x, origin.y, geo.width, geo.height, child.id
                         )
                         matches.append((ref, ancestors))
-                visit(child, [*ancestors, child.id])
+                except Exception:
+                    pass
+            visit(child, [*ancestors, child.id])
 
-        visit(root, [])
-        # A window-manager frame repeats the client's title; prefer the client (the descendant).
-        ancestor_ids = {a for _, ancestors in matches for a in ancestors}
-        clients = [ref for ref, _ in matches if ref.handle not in ancestor_ids]
+    visit(root, [])
+    # A window-manager frame repeats the client's title; prefer the client (the descendant).
+    ancestor_ids = {a for _, ancestors in matches for a in ancestors}
+    return [ref for ref, _ in matches if ref.handle not in ancestor_ids]
+
+
+def list_windows_x11() -> list[WindowRef]:
+    """Every viewable titled client window. A window without _NET_WM_PID gets the pid the X
+    server records, so wowfish's own Tk window is recognised."""
+    from dataclasses import replace
+
+    from Xlib import display
+
+    d = display.Display()
+    try:
+        return [
+            r if r.pid is not None else replace(r, pid=_xres_pid(d, r.handle or 0))
+            for r in _titled_windows(d)
+        ]
+    finally:
+        d.close()
+
+
+def find_window_x11(title_substring: str, pid: int | None = None) -> WindowRef | None:
+    """The largest viewable match, among those of process `pid` when any of them is.
+
+    Hyprland reports a pid from _NET_WM_PID or from the X server's record, and the two differ
+    when the game runs in a container with its own pid namespace, so either one counts.
+    """
+    from Xlib import display
+
+    d = display.Display()
+    try:
+        wanted = title_substring.lower()
+        clients = [r for r in _titled_windows(d) if wanted in r.title.lower()]
         if pid is not None:
             owned = [r for r in clients if pid in (r.pid, _xres_pid(d, r.handle or 0))]
             clients = owned or clients

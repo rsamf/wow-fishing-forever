@@ -159,37 +159,46 @@ def _visible(info: dict[str, Any]) -> bool:
     return info.get("layer") == 0 and info.get("alpha", 1.0) > 0 and w >= 1 and h >= 1
 
 
-def pick_quartz_window(infos: list[dict[str, Any]], title_substring: str) -> WindowRef | None:
-    """The largest visible window whose title contains the text (any case).
+def quartz_windows(infos: list[dict[str, Any]]) -> list[WindowRef]:
+    """Every visible app window, front to back.
 
     When macOS hides the title (no Screen Recording permission) the app's name stands in for
     it, so the game is still found and doctor can say what is missing.
     """
-    want = title_substring.lower()
-    best: WindowRef | None = None
+    found: list[WindowRef] = []
     for info in infos:
-        if not _visible(info):
-            continue
-        name, owner = info.get("name") or "", info.get("owner") or ""
-        if want in name.lower():
-            title = name
-        elif not name and want in owner.lower():
-            title = owner
-        else:
+        title = info.get("name") or info.get("owner") or ""
+        if not _visible(info) or not title:
             continue
         x, y, w, h = info["bounds"]
-        ref = WindowRef(
-            title,
-            info.get("pid"),
-            round(x),
-            round(y),
-            round(w),
-            round(h),
-            handle=info.get("number"),
+        found.append(
+            WindowRef(
+                title,
+                info.get("pid"),
+                round(x),
+                round(y),
+                round(w),
+                round(h),
+                handle=info.get("number"),
+            )
         )
-        if best is None or ref.width * ref.height > best.width * best.height:
+    return found
+
+
+def pick_quartz_window(infos: list[dict[str, Any]], title_substring: str) -> WindowRef | None:
+    """The largest visible window whose title contains the text (any case)."""
+    want = title_substring.lower()
+    best: WindowRef | None = None
+    for ref in quartz_windows(infos):
+        if want in ref.title.lower() and (
+            best is None or ref.width * ref.height > best.width * best.height
+        ):
             best = ref
     return best
+
+
+def list_windows_quartz() -> list[WindowRef]:
+    return quartz_windows(window_infos())
 
 
 def frontmost_pid(infos: list[dict[str, Any]]) -> int | None:

@@ -6,6 +6,7 @@ system, or Tk is touched, so a failure means the code or the assets changed, not
 from __future__ import annotations
 
 import itertools
+import os
 import random
 import subprocess
 import sys
@@ -26,8 +27,9 @@ from wowfish.audio.clips import build_fingerprints, load_reference_clips
 from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
 from wowfish.capture import WindowRef, _quartz, _wayland, _x11
-from wowfish.capture._quartz import frontmost_pid, pick_quartz_window
-from wowfish.capture._wayland import pick_hyprland_window
+from wowfish.capture._quartz import frontmost_pid, pick_quartz_window, quartz_windows
+from wowfish.capture._wayland import hyprland_windows, pick_hyprland_window
+from wowfish.capture.choices import order_choices
 from wowfish.cli import _setup_logging, app
 from wowfish.config import (
     AudioConfig,
@@ -255,6 +257,30 @@ HEX_SYMBOLS = """\tkey <AE01> {\t[ 0x26, 0x31 ] };
 """
 
 
+def test_window_picker_lists_every_window_guess_first(monkeypatch):
+    """Every window is offered, largest first, with the title guess on top exactly once, even
+    when a browser tab shares the title; wowfish's own window, tiny ones and untitled ones are
+    left out."""
+    game = WindowRef("World of Warcraft", 77, 0, 0, 2560, 1440, handle=3)
+    tab = WindowRef("World of Warcraft - Wowhead", 60, 0, 0, 3000, 2000, handle=4)
+    term = WindowRef("Terminal", 50, 0, 0, 800, 500, handle=2)
+    own = WindowRef("wowfish 1.0", os.getpid(), 0, 0, 900, 640, handle=9)
+    tiny = WindowRef("tooltip", 50, 0, 0, 40, 20, handle=5)
+    untitled = WindowRef("  ", 50, 0, 0, 800, 600, handle=6)
+    monkeypatch.setattr(capture, "_platform_windows",
+                        lambda: [term, own, game, tiny, tab, untitled])  # fmt: skip
+    assert capture.list_windows() == [term, game, tab]
+
+    apps = {77: "Wow.exe", 60: "firefox"}
+    choices = order_choices(capture.list_windows(), game, lambda w: apps.get(w.pid, ""))
+    assert [(c.window.handle, c.app, c.guess) for c in choices] == [
+        (3, "Wow.exe", True), (4, "firefox", False), (2, "", False),
+    ]  # fmt: skip
+    assert [c.window for c in order_choices([term], game, lambda w: "")] == [game, term]
+    unguessed = order_choices([term, tab], None, lambda w: "")
+    assert [(c.window, c.guess) for c in unguessed] == [(tab, False), (term, False)]
+
+
 def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
     """Hyprland reports logical geometry for native and Xwayland windows alike; the window comes
     back sized in its output's pixels, and the largest title match wins whichever kind it is. An
@@ -274,6 +300,11 @@ def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
         client("0x4c", "World of Warcraft", [0, 0], [3000, 1700], 0, 7, xwayland=True),
     ]
     monitors = [{"id": 0, "scale": 1.0}, {"id": 1, "scale": 1.2}, {"id": 2, "scale": 2.0}]
+    listed = hyprland_windows(clients, monitors)
+    assert [(r.title, r.compositor) for r in listed] == [
+        ("World of Warcraft - Wowhead", "hyprland"), ("World of Warcraft", "hyprland"),
+        ("Discord", "hyprland"), ("World of Warcraft", None),
+    ]  # fmt: skip
     w = pick_hyprland_window(clients, monitors, "world of warcraft")
     assert w is not None
     assert (w.title, w.pid, w.left, w.top, w.width, w.height) == (
@@ -325,6 +356,9 @@ def test_macos_window_focus_and_keys(monkeypatch):
     assert (w.title, w.pid, w.left, w.top, w.width, w.height, w.handle, w.scale) == (
         "World of Warcraft", 77, 0, 33, 1512, 949, 3, 1.0,
     )  # fmt: skip
+    assert [(r.handle, r.title) for r in quartz_windows(infos)] == [
+        (2, "Terminal"), (3, "World of Warcraft"), (4, "World of Warcraft - Wowhead"),
+    ]  # fmt: skip
     hidden = pick_quartz_window([{**i, "name": None} for i in infos], "World of Warcraft")
     assert hidden is not None and (hidden.title, hidden.handle) == ("World of Warcraft", 3)
     assert pick_quartz_window(infos, "Hearthstone") is None

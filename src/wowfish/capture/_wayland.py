@@ -49,39 +49,52 @@ def hyprland_request(command: str) -> Any:
     return json.loads(b"".join(parts) or b"{}")
 
 
+def _client_ref(c: dict[str, Any], scales: dict[Any, float]) -> WindowRef:
+    """A client as a WindowRef sized in its output's pixels.
+
+    Hyprland reports Xwayland windows in the same logical pixels as native ones, whatever
+    xwayland:force_zero_scaling makes their X11 size, so all compare alike. An Xwayland window
+    comes back without a handle or compositor: X11 grabs it.
+    """
+    (x, y), (w, h) = c["at"], c["size"]
+    scale = scales.get(c.get("monitor"), 1.0)
+    pid = c.get("pid")
+    native = not c.get("xwayland")
+    return WindowRef(
+        str(c.get("title") or ""),
+        int(pid) if pid and pid > 0 else None,
+        int(x),
+        int(y),
+        int(w * scale),  # grim sizes its image the same way (C truncation)
+        int(h * scale),
+        int(str(c["address"]), 16) if native else None,
+        "hyprland" if native else None,
+        scale,
+    )
+
+
+def _scales(monitors: Sequence[dict[str, Any]]) -> dict[Any, float]:
+    return {m.get("id"): float(m.get("scale") or 1.0) for m in monitors}
+
+
+def hyprland_windows(
+    clients: Sequence[dict[str, Any]], monitors: Sequence[dict[str, Any]]
+) -> list[WindowRef]:
+    """Every mapped, shown, titled window, native Wayland and Xwayland alike."""
+    scales = _scales(monitors)
+    return [
+        _client_ref(c, scales)
+        for c in clients
+        if c.get("title") and c.get("mapped", True) and not c.get("hidden")
+    ]
+
+
 def pick_hyprland_window(
     clients: Sequence[dict[str, Any]], monitors: Sequence[dict[str, Any]], title_substring: str
 ) -> WindowRef | None:
-    """The largest mapped window whose title contains the text, sized in its output's pixels.
-
-    Xwayland windows are candidates too. Hyprland reports them in the same logical pixels as
-    native ones, whatever xwayland:force_zero_scaling makes their X11 size, so all compare
-    alike. An Xwayland winner comes back without a handle or compositor: X11 grabs it.
-    """
-    scales = {m.get("id"): float(m.get("scale") or 1.0) for m in monitors}
+    """The largest mapped window whose title contains the text, sized in its output's pixels."""
     wanted = title_substring.lower()
-    found: list[WindowRef] = []
-    for c in clients:
-        title = str(c.get("title") or "")
-        if wanted not in title.lower() or not c.get("mapped", True) or c.get("hidden"):
-            continue
-        (x, y), (w, h) = c["at"], c["size"]
-        scale = scales.get(c.get("monitor"), 1.0)
-        pid = c.get("pid")
-        native = not c.get("xwayland")
-        found.append(
-            WindowRef(
-                title,
-                int(pid) if pid and pid > 0 else None,
-                int(x),
-                int(y),
-                int(w * scale),  # grim sizes its image the same way (C truncation)
-                int(h * scale),
-                int(str(c["address"]), 16) if native else None,
-                "hyprland" if native else None,
-                scale,
-            )
-        )
+    found = [r for r in hyprland_windows(clients, monitors) if wanted in r.title.lower()]
     return max(found, key=lambda r: r.width * r.height, default=None)
 
 
@@ -89,6 +102,12 @@ def find_window_hyprland(title_substring: str) -> WindowRef | None:
     return pick_hyprland_window(
         hyprland_request("clients"), hyprland_request("monitors"), title_substring
     )
+
+
+def list_windows_hyprland() -> list[WindowRef]:
+    """The native Wayland windows; Xwayland ones are listed through X11, which can grab them."""
+    found = hyprland_windows(hyprland_request("clients"), hyprland_request("monitors"))
+    return [r for r in found if r.compositor]
 
 
 def active_window_hyprland() -> int | None:
