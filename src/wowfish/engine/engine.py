@@ -19,11 +19,11 @@ from wowfish.audio._threaded import ThreadedSource
 from wowfish.capture import (
     Box,
     WindowRef,
-    find_window,
     get_capturer,
     linux_hyprland,
     linux_x11,
     macos,
+    refresh_window,
 )
 from wowfish.config import Config
 from wowfish.engine import events as ev
@@ -33,7 +33,6 @@ from wowfish.vision.matcher import IconMatch
 from wowfish.vision.region import Region
 from wowfish.vision.search import IconSearch
 
-UNFOCUSED = "World of Warcraft is not the focused window; click into the game"
 THUMB_WIDTH = 480
 AUDIO_BLOCK = 1024
 AUDIO_MAX_S = 2.0  # never read more than this at once; the device buffer may drop older audio
@@ -47,6 +46,10 @@ JUMP_LANDING_S = (1.0, 1.5)  # Fishing cannot be cast mid-air; wait this long af
 QUIT_WAIT_S = 30.0  # away from an inn, /quit counts down 20 s before the game closes
 QUIT_TRIES = 3  # quit key presses before giving up on closing the game
 BUSY = (State.CASTING, State.WAIT_BITE, State.INTERACT)  # a cast in hand
+
+
+def unfocused(title: str) -> str:
+    return f"{title} is not the focused window; click into the game"
 
 
 class FishingEngine:
@@ -63,7 +66,7 @@ class FishingEngine:
         matcher_factory: Callable[[int], Any] | None = None,
         calibrate: Callable[..., Any] | None = None,
         on_calibrated: Callable[[Any], None] | None = None,
-        find_window: Callable[..., WindowRef | None] | None = None,
+        refresh_window: Callable[[WindowRef], WindowRef | None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         rng: random.Random | None = None,
@@ -80,7 +83,7 @@ class FishingEngine:
         self._matcher_factory = matcher_factory or (lambda size: matcher)
         self._calibrate = calibrate or _real_calibrate
         self._on_calibrated = on_calibrated or (lambda cal: None)
-        self._find_window = find_window
+        self._refresh_window = refresh_window
         self.threshold = cfg.vision.icon_threshold
         # The saved size (if any) is only a first guess: every run measures the icon on its
         # first cast, since resolution and UI scale change the icon's size on screen.
@@ -166,7 +169,7 @@ class FishingEngine:
             if self.state is not State.PAUSED:
                 self._resume_state = self.state
                 self.state = State.PAUSED
-                self._emit(ev.Paused(self._t(), UNFOCUSED))
+                self._emit(ev.Paused(self._t(), unfocused(self.window.title)))
             self._drain_audio(now)
             self._sleep(SLEEP_SLICE_S)
             return
@@ -193,19 +196,32 @@ class FishingEngine:
         self._maybe_stats(now)
         self._sleep(TICK_S)
 
+    def _follow_window(self) -> None:
+        """Look at the picked window again: capture moves with it, and a new size means a new
+        icon size. A lookup that finds nothing keeps the last known window."""
+        if self._refresh_window is None:
+            return
+        found = self._refresh_window(self.window)
+        if found is None:
+            return
+        old = self.window
+        self.window = found
+        if (found.width, found.height) != (old.width, old.height):
+            self._sweeping = True  # the window changed size: measure the icon again
+        if (found.left, found.top, found.width, found.height) != (
+            old.left,
+            old.top,
+            old.width,
+            old.height,
+        ):
+            self.capturer.close()
+            self.capturer.open(found)
+
     def _cast(self, now: float) -> None:
         if self._lure_due(now):
             self._apply_lure()
             return  # still IDLE: the next step casts
-        if self._find_window is not None:
-            found = self._find_window("World of Warcraft")
-            if found is not None and (found.width, found.height) != (
-                self.window.width,
-                self.window.height,
-            ):
-                self._sweeping = True  # the window changed size: measure the icon again
-            if found is not None:
-                self.window = found
+        self._follow_window()
         if self.behavior.jump():
             self._press(self.cfg.behavior.jump_key, "jump")
             self._wait(self._rng.uniform(*JUMP_LANDING_S))
@@ -295,7 +311,7 @@ class FishingEngine:
             if self.input.is_game_focused(self.window) is False:
                 self._resume_state = State.WAIT_BITE
                 self.state = State.PAUSED
-                self._emit(ev.Paused(self._t(), UNFOCUSED))
+                self._emit(ev.Paused(self._t(), unfocused(self.window.title)))
                 return
             key = self.cfg.game.interact_key
             self._press(key, "bite")
@@ -381,7 +397,7 @@ class FishingEngine:
     def _quit_game(self) -> None:
         """Press the key of the player's /quit macro, if one is set, and wait for the game
         window to close; press it again while the window stays, QUIT_TRIES times in all."""
-        key, find = self.cfg.game.quit_key, self._find_window
+        key, find = self.cfg.game.quit_key, self._refresh_window
         if not key:
             return
         try:
@@ -416,13 +432,12 @@ class FishingEngine:
         except Exception as e:
             self._emit(ev.Error(self._t(), f"could not quit the game: {type(e).__name__}: {e}"))
 
-    def _wait_for_game_to_close(self, find: Callable[..., WindowRef | None]) -> bool:
+    def _wait_for_game_to_close(self, refresh: Callable[[WindowRef], WindowRef | None]) -> bool:
         """Look for the game window every second for up to QUIT_WAIT_S; True once it is gone."""
         deadline = self._clock() + QUIT_WAIT_S
         while not self._stop:
-            found = find("World of Warcraft")
-            if found is None or (found.handle, found.pid) != (self.window.handle, self.window.pid):
-                return True  # nothing left, or only another window with the title
+            if refresh(self.window) is None:
+                return True
             if self._clock() >= deadline:
                 return False
             self._wait(1.0)
@@ -585,9 +600,9 @@ def missing_permissions(request: bool = False) -> list[str]:
 
 def build_engine(
     cfg: Config,
+    window: WindowRef,
     *,
     session_s: float | None = None,
-    title: str = "World of Warcraft",
     record_audio: Path | None = None,
 ) -> FishingEngine:
     """Wire the real capturer, input device, audio source, detector, and matcher for `cfg`.
@@ -609,9 +624,10 @@ def build_engine(
     missing = missing_permissions(request=True)
     if missing:
         raise RuntimeError("; ".join(missing))
-    window = find_window(title)
-    if window is None:
-        raise RuntimeError(f"no window titled {title!r}; is the game running?")
+    current = refresh_window(window)
+    if current is None:
+        raise RuntimeError(f"{window.title!r} is no longer open; pick it again")
+    window = current
     templates = load_icon_templates()
 
     def matcher_factory(size: int) -> IconMatcher:
@@ -635,7 +651,9 @@ def build_engine(
         save_config(replace(current, vision=vision))
 
     detector = detector_for(cfg.audio)
-    audio: Any = ThreadedSource(open_capture(cfg.audio.selector, pid=window.pid, title=title))
+    audio: Any = ThreadedSource(
+        open_capture(cfg.audio.selector, pid=window.pid, title=window.title)
+    )
     if record_audio is not None:
         audio = RecordingSource(audio, record_audio)
     return FishingEngine(
@@ -647,7 +665,7 @@ def build_engine(
         detector=detector,
         matcher_factory=matcher_factory,
         on_calibrated=on_calibrated,
-        find_window=lambda t=title: find_window(t),
+        refresh_window=refresh_window,
         session_s=session_s,
     )
 

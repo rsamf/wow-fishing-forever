@@ -323,13 +323,13 @@ class Presenter:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, minutes: float | None = None) -> None:
+    def start(self, window: Any, minutes: float | None = None) -> None:
         if self.running:
             return
         self.reload()
         try:
             session_s = None if minutes is None else minutes * 60
-            engine = self._build_engine(self.cfg, session_s=session_s)
+            engine = self._build_engine(self.cfg, window, session_s=session_s)
         except Exception as e:
             self._results.put(WorkerFailed("start", str(e)))
             return

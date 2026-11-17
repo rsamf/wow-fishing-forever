@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tomllib
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -494,7 +495,9 @@ class _Pond:
         self.bite_after_s = bite_after_s
         self.ignored_quits = ignored_quits
         self.closes_at = float("inf")
-        self.window = WindowRef("World of Warcraft", None, 0, 0, 10, 10)
+        self.window = WindowRef("World of Warcraft", None, 0, 0, 10, 10, handle=1)
+        self.moves: list[tuple[float, WindowRef | None]] = []  # (from when, what refresh finds)
+        self.opened: list[WindowRef] = []
         self.focused = True
         self.pressed: list[tuple[float, str, float]] = []  # time, key, hold
         self.bites: list[float] = []
@@ -507,7 +510,7 @@ class _Pond:
         self.t += s
 
     def open(self, window) -> None:
-        pass
+        self.opened.append(window)
 
     def close(self) -> None:
         pass
@@ -528,8 +531,14 @@ class _Pond:
             if self.ignored_quits < 0:
                 self.closes_at = min(self.closes_at, self.t + 20)
 
-    def find(self, title: str) -> WindowRef | None:
-        return None if self.t >= self.closes_at else self.window
+    def refresh(self, window: WindowRef) -> WindowRef | None:
+        if self.t >= self.closes_at:
+            return None
+        found: WindowRef | None = self.window
+        for at, moved in self.moves:
+            if self.t >= at:
+                found = moved
+        return found
 
     def is_game_focused(self, window) -> bool:
         return self.focused
@@ -565,7 +574,7 @@ def _fish(
     engine = FishingEngine(
         cfg, pond.window,
         capturer=pond, input_device=pond, audio_source=pond, detector=pond, matcher=pond,
-        find_window=pond.find, clock=pond.clock, sleep=pond.sleep, rng=random.Random(7),
+        refresh_window=pond.refresh, clock=pond.clock, sleep=pond.sleep, rng=random.Random(7),
     )  # fmt: skip
     while pond.t < minutes * 60 and engine.state is not State.STOPPED:
         engine.step()
@@ -613,6 +622,26 @@ def test_fishing_loop_varies_its_rhythm_only_when_asked():
     for (jumped_at, before, _), (t, key, _) in zip(pond.pressed, pond.pressed[1:], strict=False):
         if key == "1":
             assert before == "space" and t - jumped_at >= 1.0
+
+
+def test_engine_follows_the_window_it_was_given():
+    """Before each cast the bot looks at the picked window again: when it moved or was resized,
+    capture opens again on the new spot; when the lookup finds nothing, the last known window
+    stays in use. Pauses name the picked window, whatever its title."""
+    pond = _Pond()
+    pond.window = WindowRef("Mundo de Warcraft", 7, 0, 0, 10, 10, handle=1)
+    moved = replace(pond.window, left=100)
+    resized = replace(moved, width=20, height=20)
+    pond.moves = [(30.0, moved), (60.0, None), (90.0, resized)]
+    pond, lines = _fish(BehaviorConfig(), 2, pond=pond)
+    assert pond.opened == [moved, resized]
+    assert sum(k == "1" for _, k, _ in pond.pressed) > 10  # kept fishing through the None
+
+    pond = _Pond()
+    pond.window = WindowRef("Mundo de Warcraft", 7, 0, 0, 10, 10, handle=1)
+    pond.focused = False
+    _, lines = _fish(BehaviorConfig(), 1, pond=pond)
+    assert "Paused: Mundo de Warcraft is not the focused window; click into the game" in lines
 
 
 def test_session_limit_quits_the_game_only_when_asked():

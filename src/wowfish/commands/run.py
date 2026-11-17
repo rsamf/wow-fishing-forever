@@ -11,7 +11,12 @@ import typer
 from loguru import logger
 
 from wowfish.audio import AudioUnavailable
-from wowfish.commands._common import fail, load_config_or_fail
+from wowfish.commands._common import (
+    fail,
+    load_config_or_fail,
+    pick_window_or_fail,
+    preflight_or_fail,
+)
 from wowfish.engine import events as ev
 from wowfish.engine.engine import build_engine
 from wowfish.engine.thread import EngineThread
@@ -29,7 +34,6 @@ def run(
     minutes: float | None = typer.Option(
         None, "--minutes", min=0.0, help="Stop after this long (default: game.session_minutes)."
     ),
-    title: str = typer.Option("World of Warcraft", "--title", help="Window title to drive."),
     record_audio: Annotated[
         Path | None,
         typer.Option(
@@ -40,11 +44,13 @@ def run(
 ) -> None:
     """Cast, find the bobber, hear the splash, press Interact, loot, repeat. Ctrl-C stops."""
     cfg = load_config_or_fail()
+    preflight_or_fail()
+    window = pick_window_or_fail()
     try:
         engine = build_engine(
             cfg,
+            window,
             session_s=None if minutes is None else minutes * 60,
-            title=title,
             record_audio=record_audio,
         )
     except (RuntimeError, NotSupported, AudioUnavailable) as e:

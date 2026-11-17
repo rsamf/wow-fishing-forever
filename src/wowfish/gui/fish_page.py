@@ -64,7 +64,11 @@ class FishPage:
             self.blockers.configure(text="; ".join(reasons))
             return
         self.blockers.configure(text="")
-        self.p.start()
+        from wowfish.capture import GAME_TITLE, find_window
+
+        window = find_window(GAME_TITLE)  # until the picker dialog replaces this guess
+        if window is not None:
+            self.p.start(window)
 
     def render(self, view: View) -> None:
         self.state.configure(text=view.state)
