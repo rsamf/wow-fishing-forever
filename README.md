@@ -146,7 +146,18 @@ Every time you press **Start**, wowfish shows the windows that are open, each wi
 
 In the terminal, `wowfish run` prints the same list with numbers: press Enter for the first window or type a number. A script can answer for you: `echo 1 | wowfish run`.
 
-While the bot is running, keep the water in view and the game client in focus.
+While the bot is running, keep the water in view and the game client in focus, or turn on background fishing:
+
+### Fishing in the background
+
+Tick **Fish while I use another window** on the Setup tab (`background = true` under `[run]` in the config file) and you can work in other windows while the bot fishes. When it hears the splash it brings the game to the front, presses Interact, waits for the loot, casts again, and gives focus back to the window you were in. That takes a few seconds per fish, and anything you type in that time goes to the game. With the option off, the bot pauses whenever the game is not the focused window.
+
+- In the game, turn on **Sound in Background** (*Options > Audio*), or the bot cannot hear the splash.
+- Keep the game window open. It can be covered by other windows, but not minimized.
+- If the system refuses to hand the game the focus, the bot presses nothing and waits for you to click into the game.
+- **GNOME:** allow the "Remote Desktop" prompt. The bot gets back to a native Wayland app (most browsers and editors) by pressing Alt+Tab, so leave Alt+Tab on its default "switch windows".
+- **Hyprland:** a game running as a native Wayland window must also stay uncovered on a visible workspace, because the bot can only read the screen there. A game under Xwayland can be covered.
+- **macOS:** the bot brings the game's whole app forward, not one window of it.
 
 To vary the bot's rhythm, fill in the `[behavior]` section of the config file (`wowfish config --path`): breaks after a stretch of fishing, a reaction delay before Interact, the odd bite let go on purpose, uneven key holds, and a jump before the occasional cast. It is all off by default.
 
