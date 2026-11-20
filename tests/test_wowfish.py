@@ -32,11 +32,7 @@ from wowfish.audio.detector import BiteDetector, BiteEvent, detector_for
 from wowfish.audio.features import DEFAULT_MEL
 from wowfish.capture import WindowRef, _quartz, _wayland, _x11
 from wowfish.capture._own import WindowPixelsCapturer
-from wowfish.capture._quartz import (
-    frontmost_pid,
-    quartz_windows,
-    refreshed_from_infos,
-)
+from wowfish.capture._quartz import quartz_windows, refreshed_from_infos
 from wowfish.capture._wayland import (
     hyprland_windows,
     refresh_hyprland,
@@ -378,11 +374,9 @@ def test_wayland_window_and_keys_from_compositor_replies(monkeypatch):
 
 def test_macos_window_focus_and_keys(monkeypatch):
     """CoreGraphics lists windows front to back, in points. The largest visible title match wins;
-    when macOS withholds titles (Screen Recording off) the app's name stands in. The front-most
-    visible app window owns the keyboard, whatever floats above it. On macOS the window lookup,
-    the platform check, and the input device all go through Quartz, every supported key has its
-    own keycode, and a key press without the Accessibility permission says so instead of being
-    dropped."""
+    when macOS withholds titles (Screen Recording off) the app's name stands in. The keyboard
+    can take and return focus while another app is active, even when macOS refuses the old
+    activation request. A key press without Accessibility permission reports the problem."""
 
     def win(number, name, owner, pid, bounds, layer=0, alpha=1.0):
         return {"number": number, "name": name, "owner": owner, "pid": pid, "layer": layer,
@@ -405,12 +399,34 @@ def test_macos_window_focus_and_keys(monkeypatch):
         quartz_windows([{**i, "name": None} for i in infos]), "World of Warcraft"
     )
     assert hidden is not None and (hidden.title, hidden.handle) == ("World of Warcraft", 3)
-    assert (frontmost_pid(infos), frontmost_pid(infos[2:])) == (50, 77)
 
     assert set(MAC_KEYCODES) == set(SUPPORTED_KEYS)
     assert len(set(MAC_KEYCODES.values())) == len(MAC_KEYCODES)
     assert (MAC_KEYCODES["1"], MAC_KEYCODES["f"], MAC_KEYCODES["f1"]) == (0x12, 0x03, 0x7A)
 
+    front_pid = 50
+
+    def send(obj, selector, **_kwargs):
+        if (obj, selector) == ("NSWorkspace", "sharedWorkspace"):
+            return "workspace"
+        if (obj, selector) == ("workspace", "frontmostApplication"):
+            return "front app" if front_pid else None
+        assert (obj, selector) == ("front app", "processIdentifier")
+        return front_pid
+
+    def set_attribute(pid, attribute, value):
+        nonlocal front_pid
+        if (attribute, value) != (b"AXFrontmost", True):
+            return -25205  # kAXErrorAttributeUnsupported
+        front_pid = pid
+        return 0
+
+    ax = SimpleNamespace(
+        AXUIElementCreateApplication=lambda pid: pid,
+        AXUIElementSetMessagingTimeout=lambda app, timeout: 0,
+        AXUIElementSetAttributeValue=set_attribute,
+    )
+    cf = SimpleNamespace(CFRelease=id, CFStringCreateWithCString=lambda _, value, encoding: value)
     posted: list[tuple[int, bool]] = []
     cg = SimpleNamespace(
         CGEventSourceCreate=lambda state: 1,
@@ -420,12 +436,19 @@ def test_macos_window_focus_and_keys(monkeypatch):
     )
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(_quartz, "window_infos", lambda: infos)
-    monkeypatch.setattr(_quartz, "frameworks", lambda: (cg, SimpleNamespace(CFRelease=id)))
+    monkeypatch.setattr(_quartz, "frameworks", lambda: (cg, cf))
+    monkeypatch.setattr(_quartz, "constant", lambda lib, name: name == "kCFBooleanTrue")
+    monkeypatch.setattr(_quartz, "_appkit", lambda cls: nullcontext((send, cls.decode())))
+    monkeypatch.setattr(input_quartz, "_app_services", lambda: ax)
     assert capture.best_title_match(capture.list_windows(), capture.GAME_TITLE) == w
     assert unsupported_platform() == ""
     keyboard = get_input_device(w)
     assert isinstance(keyboard, input_quartz.QuartzInputDevice)
+    previous = keyboard.current_focus()
+    assert previous == 50
     assert keyboard.is_game_focused(w) is False  # Terminal is in front
+    keyboard.focus_window(w)
+    assert keyboard.is_game_focused(w) is True
     monkeypatch.setattr(input_quartz, "accessibility_available", lambda: (False, "Accessibility"))
     try:
         keyboard.press_key("f", 0)
@@ -436,6 +459,11 @@ def test_macos_window_focus_and_keys(monkeypatch):
     monkeypatch.setattr(input_quartz, "accessibility_available", lambda: (True, ""))
     keyboard.press_key("F", 0)
     assert posted == [(0x03, True), (0x03, False)]
+    keyboard.restore_focus(previous)
+    assert keyboard.current_focus() == 50
+    assert keyboard.is_game_focused(w) is False
+    front_pid = None
+    assert keyboard.is_game_focused(w) is False  # no app has keyboard focus
 
 
 def test_macos_listens_to_blackhole(monkeypatch, tmp_path):
