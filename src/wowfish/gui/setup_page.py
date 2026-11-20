@@ -210,9 +210,11 @@ class SetupPage:
         )
 
     def _save_window_title(self) -> None:
+        from wowfish.config import ConfigError
+
         try:
             self.p.save_window_title(self.randomize_title.get(), self.title_interval.get())
-        except (ValueError, OSError) as e:
+        except (ConfigError, ValueError, OSError) as e:
             self.title_note.configure(text=str(e))
             return
         self._on_title_change()
