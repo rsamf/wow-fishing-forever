@@ -6,9 +6,7 @@ press_key checks first and says where to turn it on.
 
 from __future__ import annotations
 
-import contextlib
 import ctypes
-import math
 import sys
 import time
 from functools import cache
@@ -21,7 +19,7 @@ from wowfish.input.keys import MAC_KEYCODES, is_supported_key, normalize_key
 HID_EVENT_TAP = 0  # kCGHIDEventTap: as if from the keyboard
 HID_SYSTEM_STATE = 1  # kCGEventSourceStateHIDSystemState
 NON_COALESCED = 0x100  # kCGEventFlagMaskNonCoalesced, the only flag a plain key press carries
-FOCUS_CACHE_S = 0.05
+FOCUS_REQUEST_TIMEOUT_S = 0.25  # an app that is not responding must not stall the engine
 
 
 @cache
@@ -32,9 +30,15 @@ def _app_services() -> Any:
         lib = ctypes.CDLL(_quartz.APPLICATION_SERVICES)
     except OSError as e:
         raise InputUnavailable(f"ApplicationServices ({e})") from e
-    lib.AXIsProcessTrusted.argtypes, lib.AXIsProcessTrusted.restype = [], ctypes.c_bool
-    lib.AXIsProcessTrustedWithOptions.argtypes = [ctypes.c_void_p]
-    lib.AXIsProcessTrustedWithOptions.restype = ctypes.c_bool
+    vp = ctypes.c_void_p
+    for fn, args, res in (
+        (lib.AXIsProcessTrusted, [], ctypes.c_bool),
+        (lib.AXIsProcessTrustedWithOptions, [vp], ctypes.c_bool),
+        (lib.AXUIElementCreateApplication, [ctypes.c_int], vp),
+        (lib.AXUIElementSetMessagingTimeout, [vp, ctypes.c_float], ctypes.c_int32),
+        (lib.AXUIElementSetAttributeValue, [vp, vp, vp], ctypes.c_int32),
+    ):
+        fn.argtypes, fn.restype = args, res
     return lib
 
 
@@ -78,7 +82,6 @@ class QuartzInputDevice:
         except NotSupported as e:
             raise InputUnavailable(f"Quartz key events ({e})") from e
         self._source = self._cg.CGEventSourceCreate(HID_SYSTEM_STATE)
-        self._focus: tuple[float, int | None] = (-math.inf, None)
 
     def close(self) -> None:
         if self._source:
@@ -107,31 +110,38 @@ class QuartzInputDevice:
         time.sleep(hold_s)
         self._post(code, False)
 
-    def is_game_focused(self, window: WindowRef) -> bool | None:
-        if window.pid is None:
-            return None
-        now = time.monotonic()
-        checked, front = self._focus
-        if now - checked >= FOCUS_CACHE_S:
-            try:
-                front = _quartz.frontmost_pid(_quartz.window_infos())
-            except Exception:
-                return None
-            self._focus = (now, front)
-        return None if front is None else front == window.pid
+    def is_game_focused(self, window: WindowRef) -> bool:
+        # Quartz posts to the active app. A failed lookup must not let a key through.
+        return window.pid is not None and self.current_focus() == window.pid
 
     # -- focus ------------------------------------------------------------------------------
 
     def _activate(self, pid: object | None) -> None:
-        if isinstance(pid, int):
-            with contextlib.suppress(Exception):
-                _quartz.activate_app(pid)
-        self._focus = (-math.inf, None)  # look afresh
-
-    def current_focus(self) -> object | None:
+        if not isinstance(pid, int) or pid <= 0:
+            return
+        lib = _app_services()
+        app = lib.AXUIElementCreateApplication(pid)
+        if not app:
+            return
+        frontmost = None
         try:
-            return _quartz.frontmost_pid(_quartz.window_infos())
-        except Exception:
+            # macOS 14+ ignores NSApplicationActivateIgnoringOtherApps. Use the Accessibility
+            # grant we already have to request focus even when wowfish itself is in the background.
+            frontmost = self._cf.CFStringCreateWithCString(None, b"AXFrontmost", _quartz.UTF8)
+            if frontmost:
+                lib.AXUIElementSetMessagingTimeout(app, FOCUS_REQUEST_TIMEOUT_S)
+                lib.AXUIElementSetAttributeValue(
+                    app, frontmost, _quartz.constant(self._cf, "kCFBooleanTrue")
+                )  # the engine checks whether focus actually moved
+        finally:
+            if frontmost:
+                self._cf.CFRelease(frontmost)
+            self._cf.CFRelease(app)
+
+    def current_focus(self) -> int | None:
+        try:
+            return _quartz.frontmost_pid()
+        except OSError:
             return None
 
     def focus_window(self, window: WindowRef) -> None:

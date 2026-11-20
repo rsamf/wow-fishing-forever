@@ -76,6 +76,7 @@ def frameworks() -> tuple[Any, Any]:
         (cf.CFStringGetLength, [vp], idx),
         (cf.CFStringGetMaximumSizeForEncoding, [idx, ctypes.c_uint32], idx),
         (cf.CFStringGetCString, [vp, ctypes.c_char_p, idx, ctypes.c_uint32], ctypes.c_bool),
+        (cf.CFStringCreateWithCString, [vp, ctypes.c_char_p, ctypes.c_uint32], vp),
         (cf.CFNumberGetValue, [vp, idx, vp], ctypes.c_bool),
         (cf.CFRelease, [vp], None),
         (cg.CGWindowListCopyWindowInfo, [ctypes.c_uint32, ctypes.c_uint32], vp),
@@ -204,11 +205,6 @@ def list_windows_quartz() -> list[WindowRef]:
     return quartz_windows(window_infos())
 
 
-def frontmost_pid(infos: list[dict[str, Any]]) -> int | None:
-    """The process that owns the front-most visible app window (the list runs front to back)."""
-    return next((info.get("pid") for info in infos if _visible(info)), None)
-
-
 def snapshot_quartz(number: int) -> Any:
     """The window's own pixels as BGR at nominal resolution, even when covered; None when
     macOS will not give them (no Screen Recording permission, or the call is gone)."""
@@ -254,15 +250,21 @@ def snapshot_quartz(number: int) -> Any:
         cg.CGImageRelease(image)
 
 
-@contextmanager
-def _running_app(pid: int) -> Iterator[tuple[Any, Any]]:
-    """(send, app): Objective-C message sending and the NSRunningApplication for `pid` (0 when
-    there is none), inside an autorelease pool."""
+@cache
+def _objc_runtime() -> Any:
     objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
     ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
     vp = ctypes.c_void_p
     objc.objc_getClass.argtypes, objc.objc_getClass.restype = [ctypes.c_char_p], vp
     objc.sel_registerName.argtypes, objc.sel_registerName.restype = [ctypes.c_char_p], vp
+    return objc
+
+
+@contextmanager
+def _appkit(class_name: bytes) -> Iterator[tuple[Any, Any]]:
+    """Objective-C message sending and an AppKit class, inside an autorelease pool."""
+    objc = _objc_runtime()
+    vp = ctypes.c_void_p
 
     def send(
         obj: Any, selector: str, *args: Any, types: tuple[Any, ...] = (), res: Any = vp
@@ -272,15 +274,17 @@ def _running_app(pid: int) -> Iterator[tuple[Any, Any]]:
 
     pool = send(objc.objc_getClass(b"NSAutoreleasePool"), "new")
     try:
-        app = send(
-            objc.objc_getClass(b"NSRunningApplication"),
-            "runningApplicationWithProcessIdentifier:",
-            pid,
-            types=(ctypes.c_int,),
-        )
-        yield send, app
+        yield send, objc.objc_getClass(class_name)
     finally:
         send(pool, "drain")
+
+
+def frontmost_pid() -> int | None:
+    """The app receiving key events, regardless of which window is drawn on top."""
+    with _appkit(b"NSWorkspace") as (send, cls):
+        workspace = send(cls, "sharedWorkspace")
+        app = send(workspace, "frontmostApplication")
+        return send(app, "processIdentifier", res=ctypes.c_int) if app else None
 
 
 def icon_quartz(pid: int, size: int) -> Any:
@@ -290,7 +294,8 @@ def icon_quartz(pid: int, size: int) -> Any:
 
     if sys.platform != "darwin":
         return None
-    with _running_app(pid) as (send, app):
+    with _appkit(b"NSRunningApplication") as (send, cls):
+        app = send(cls, "runningApplicationWithProcessIdentifier:", pid, types=(ctypes.c_int,))
         icon = send(app, "icon") if app else None
         tiff = send(icon, "TIFFRepresentation") if icon else None
         if not tiff:
@@ -298,25 +303,6 @@ def icon_quartz(pid: int, size: int) -> Any:
         raw = ctypes.string_at(send(tiff, "bytes"), send(tiff, "length", res=ctypes.c_ulong))
         img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
         return square_bgra(img, size)
-
-
-def activate_app(pid: int) -> bool:
-    """Bring the app with this pid to the front (all of it: macOS focuses apps, not windows)."""
-    if sys.platform != "darwin":
-        return False
-    with _running_app(pid) as (send, app):
-        if not app:
-            return False
-        ignoring_other_apps = 1 << 1  # NSApplicationActivateIgnoringOtherApps
-        return bool(
-            send(
-                app,
-                "activateWithOptions:",
-                ignoring_other_apps,
-                types=(ctypes.c_ulong,),
-                res=ctypes.c_bool,
-            )
-        )
 
 
 def screen_capture_available(request: bool = False) -> tuple[bool, str]:
