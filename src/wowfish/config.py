@@ -19,6 +19,8 @@ from wowfish.assets import default_config_path
 from wowfish.input.keys import is_supported_key
 
 _LINE_RE = re.compile(r"\(at line (\d+), column \d+\)")
+# Keep Tk's timer delay in milliseconds within a signed 32-bit integer.
+MAX_TITLE_INTERVAL_S = (2**31 - 1) // 1000
 
 
 # Settings from older releases: still accepted in a config file, and ignored without a warning.
@@ -93,12 +95,19 @@ class BehaviorConfig:
 
 
 @dataclass(frozen=True)
+class GuiConfig:
+    randomize_title: bool = False
+    title_interval_s: int = 300
+
+
+@dataclass(frozen=True)
 class Config:
     game: GameConfig
     vision: VisionConfig
     audio: AudioConfig
     run: RunConfig = field(default_factory=RunConfig)
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
+    gui: GuiConfig = field(default_factory=GuiConfig)
 
 
 _SECTIONS: dict[str, type] = {
@@ -107,6 +116,7 @@ _SECTIONS: dict[str, type] = {
     "audio": AudioConfig,
     "run": RunConfig,
     "behavior": BehaviorConfig,
+    "gui": GuiConfig,
 }
 
 
@@ -292,6 +302,11 @@ def _validate(path: Path, cfg: Config) -> None:
         "must be 0 or positive and leave run.key_hold_ms - jitter at 10 or more",
     )
     check(is_supported_key(b.jump_key), "behavior.jump_key", "must be a supported key name")
+    check(
+        1 <= cfg.gui.title_interval_s <= MAX_TITLE_INTERVAL_S,
+        "gui.title_interval_s",
+        f"must be between 1 and {MAX_TITLE_INTERVAL_S} seconds",
+    )
 
 
 def to_toml(cfg: Config) -> str:
