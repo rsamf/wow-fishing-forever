@@ -72,3 +72,9 @@ key_hold_jitter_ms = 0
 # Chance (0..1) of jumping in place before a cast, and the Jump keybind.
 jump_chance = 0.0
 jump_key = "space"
+
+[gui]
+# Generate a random window title at launch and at each interval while the window is open.
+randomize_title = false
+# Time between title changes, in whole seconds.
+title_interval_s = 300

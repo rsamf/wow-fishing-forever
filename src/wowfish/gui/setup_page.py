@@ -1,10 +1,12 @@
-"""Setup tab: prerequisites, keys, time limit, audio settings."""
+"""Setup tab: prerequisites, keys, time limit, window title, audio settings."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from wowfish.capture import linux_hyprland
+from wowfish.config import MAX_TITLE_INTERVAL_S
 from wowfish.gui.presenter import Presenter
 
 CHECKLIST = (
@@ -47,11 +49,14 @@ def background_help(hyprland: bool) -> str:
 
 
 class SetupPage:
-    def __init__(self, parent: Any, presenter: Presenter) -> None:
+    def __init__(
+        self, parent: Any, presenter: Presenter, *, on_title_change: Callable[[], None]
+    ) -> None:
         import ttkbootstrap as tb
         from ttkbootstrap.widgets import ToolTip
 
         self.p = presenter
+        self._on_title_change = on_title_change
         self.frame = tb.Frame(parent, padding=10)
         f = self.frame
         tb.Label(f, text=CHECKLIST, justify="left").pack(anchor="w", pady=(0, 10))
@@ -112,6 +117,24 @@ class SetupPage:
         ToolTip(help_icon, text=background_help(linux_hyprland()), wraplength=wrap)
         self.background_note = tb.Label(background, text="")
         self.background_note.pack(side="left")
+
+        title = tb.Labelframe(f, text="Window title", padding=8)
+        title.pack(fill="x", pady=4)
+        self.randomize_title = tb.BooleanVar(value=presenter.cfg.gui.randomize_title)
+        tb.Checkbutton(title, text="Randomize window title", variable=self.randomize_title).pack(
+            side="left"
+        )
+        tb.Label(title, text="Change every").pack(side="left", padx=(12, 0))
+        self.title_interval = tb.Spinbox(title, from_=1, to=MAX_TITLE_INTERVAL_S, width=8)
+        self.title_interval.set(presenter.cfg.gui.title_interval_s)
+        self.title_interval.pack(side="left", padx=6)
+        self.title_interval.bind("<Return>", lambda _e: self._save_window_title())
+        tb.Label(title, text="seconds").pack(side="left")
+        tb.Button(title, text="Save", command=self._save_window_title, bootstyle="secondary").pack(
+            side="left", padx=6
+        )
+        self.title_note = tb.Label(title, text="")
+        self.title_note.pack(side="left")
 
         audio = tb.Labelframe(f, text="Audio (what the bot hears)", padding=8)
         audio.pack(fill="x", pady=4)
@@ -185,6 +208,17 @@ class SetupPage:
         self.background_note.configure(
             text=f"saved {'on' if on else 'off'}; used from the next Start"
         )
+
+    def _save_window_title(self) -> None:
+        from wowfish.config import ConfigError
+
+        try:
+            self.p.save_window_title(self.randomize_title.get(), self.title_interval.get())
+        except (ConfigError, ValueError, OSError) as e:
+            self.title_note.configure(text=str(e))
+            return
+        self._on_title_change()
+        self.title_note.configure(text="saved")
 
     def _save_bite(self) -> None:
         try:

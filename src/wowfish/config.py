@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 import re
 import tomllib
+from collections.abc import MutableMapping
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+from shutil import copymode
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import tomli_w
@@ -19,6 +22,8 @@ from wowfish.assets import default_config_path
 from wowfish.input.keys import is_supported_key
 
 _LINE_RE = re.compile(r"\(at line (\d+), column \d+\)")
+# Keep Tk's timer delay in milliseconds within a signed 32-bit integer.
+MAX_TITLE_INTERVAL_S = (2**31 - 1) // 1000
 
 
 # Settings from older releases: still accepted in a config file, and ignored without a warning.
@@ -93,12 +98,19 @@ class BehaviorConfig:
 
 
 @dataclass(frozen=True)
+class GuiConfig:
+    randomize_title: bool = False
+    title_interval_s: int = 300
+
+
+@dataclass(frozen=True)
 class Config:
     game: GameConfig
     vision: VisionConfig
     audio: AudioConfig
     run: RunConfig = field(default_factory=RunConfig)
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
+    gui: GuiConfig = field(default_factory=GuiConfig)
 
 
 _SECTIONS: dict[str, type] = {
@@ -107,6 +119,7 @@ _SECTIONS: dict[str, type] = {
     "audio": AudioConfig,
     "run": RunConfig,
     "behavior": BehaviorConfig,
+    "gui": GuiConfig,
 }
 
 
@@ -224,6 +237,40 @@ def save_config(cfg: Config, path: Path | None = None) -> None:
     path.write_text(to_toml(cfg))
 
 
+def save_window_title_settings(gui: GuiConfig, path: Path | None = None) -> None:
+    """Edit the two title settings in the existing TOML or in the bundled default template."""
+    path = (path or paths.config_file()).resolve()
+    try:
+        original = path.read_bytes().decode("utf-8")
+    except FileNotFoundError:
+        original = None
+
+    source = default_config_path().read_bytes().decode("utf-8") if original is None else original
+    try:
+        doc = tomlkit.parse(source)
+    except tomlkit.exceptions.ParseError as e:
+        raise ConfigError(path, str(e)) from e
+    table = doc.setdefault("gui", tomlkit.table())
+    if not isinstance(table, MutableMapping):
+        raise ConfigError(path, "[gui] must be a table")
+    for key, value in (
+        ("randomize_title", gui.randomize_title),
+        ("title_interval_s", gui.title_interval_s),
+    ):
+        if table.get(key) != value:
+            table[key] = value
+
+    updated = tomlkit.dumps(doc)
+    if updated == original:
+        return
+    with TemporaryDirectory(dir=path.parent) as directory:
+        temp = Path(directory) / path.name
+        temp.write_text(updated, encoding="utf-8", newline="")
+        if original is not None:
+            copymode(path, temp)
+        temp.replace(path)
+
+
 def _build_section(
     path: Path, section: str, cls: type, table: dict[str, Any], warnings: list[str]
 ) -> Any:
@@ -292,6 +339,11 @@ def _validate(path: Path, cfg: Config) -> None:
         "must be 0 or positive and leave run.key_hold_ms - jitter at 10 or more",
     )
     check(is_supported_key(b.jump_key), "behavior.jump_key", "must be a supported key name")
+    check(
+        1 <= cfg.gui.title_interval_s <= MAX_TITLE_INTERVAL_S,
+        "gui.title_interval_s",
+        f"must be between 1 and {MAX_TITLE_INTERVAL_S} seconds",
+    )
 
 
 def to_toml(cfg: Config) -> str:

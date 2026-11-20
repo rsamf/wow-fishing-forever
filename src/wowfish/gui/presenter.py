@@ -11,7 +11,13 @@ from typing import Any
 from loguru import logger
 
 from wowfish.audio import AudioUnavailable
-from wowfish.config import Config, load_config, save_config
+from wowfish.config import (
+    MAX_TITLE_INTERVAL_S,
+    Config,
+    load_config,
+    save_config,
+    save_window_title_settings,
+)
 from wowfish.engine import events as ev
 from wowfish.engine.state import State
 from wowfish.engine.thread import EngineThread
@@ -149,6 +155,19 @@ class Presenter:
         if on != self.cfg.run.background:
             save_config(replace(self.cfg, run=replace(self.cfg.run, background=on)))
             self.reload()
+
+    def save_window_title(self, randomize: bool, interval: str) -> None:
+        try:
+            seconds = int(interval)
+        except ValueError:
+            seconds = 0
+        if not 1 <= seconds <= MAX_TITLE_INTERVAL_S:
+            raise ValueError(f"enter whole seconds from 1 to {MAX_TITLE_INTERVAL_S:,}")
+
+        self.reload()
+        gui = replace(self.cfg.gui, randomize_title=randomize, title_interval_s=seconds)
+        save_window_title_settings(gui)
+        self.cfg = replace(self.cfg, gui=gui)
 
     def audio_devices(self) -> list[Any]:
         """macOS cannot capture one app, so there it is the input devices, BlackHole first
