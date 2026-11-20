@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 import re
 import tomllib
+from collections.abc import MutableMapping
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+from shutil import copymode
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import tomli_w
@@ -232,6 +235,40 @@ def load_config(path: Path | None = None) -> tuple[Config, list[str]]:
 def save_config(cfg: Config, path: Path | None = None) -> None:
     path = path or paths.config_file()
     path.write_text(to_toml(cfg))
+
+
+def save_window_title_settings(gui: GuiConfig, path: Path | None = None) -> None:
+    """Edit the two title settings in the existing TOML or in the bundled default template."""
+    path = (path or paths.config_file()).resolve()
+    try:
+        original = path.read_bytes().decode("utf-8")
+    except FileNotFoundError:
+        original = None
+
+    source = default_config_path().read_bytes().decode("utf-8") if original is None else original
+    try:
+        doc = tomlkit.parse(source)
+    except tomlkit.exceptions.ParseError as e:
+        raise ConfigError(path, str(e)) from e
+    table = doc.setdefault("gui", tomlkit.table())
+    if not isinstance(table, MutableMapping):
+        raise ConfigError(path, "[gui] must be a table")
+    for key, value in (
+        ("randomize_title", gui.randomize_title),
+        ("title_interval_s", gui.title_interval_s),
+    ):
+        if table.get(key) != value:
+            table[key] = value
+
+    updated = tomlkit.dumps(doc)
+    if updated == original:
+        return
+    with TemporaryDirectory(dir=path.parent) as directory:
+        temp = Path(directory) / path.name
+        temp.write_text(updated, encoding="utf-8", newline="")
+        if original is not None:
+            copymode(path, temp)
+        temp.replace(path)
 
 
 def _build_section(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tomllib
 from itertools import count
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -8,6 +9,7 @@ from unittest.mock import Mock
 import pytest
 
 from wowfish import __version__, paths
+from wowfish.assets import default_config_path
 from wowfish.config import ConfigError, load_config
 from wowfish.gui import app as gui_app
 from wowfish.gui.presenter import Presenter
@@ -32,6 +34,52 @@ def test_window_title_preferences_are_saved():
     assert cfg.gui.randomize_title is True
     assert cfg.gui.title_interval_s == 45
     assert cfg.game.cast_key == "7"
+    assert tomllib.loads(path.read_text()) == {
+        "game": {"cast_key": "7"},
+        "gui": {"randomize_title": True, "title_interval_s": 45},
+    }
+
+
+def test_saving_window_title_preserves_existing_toml():
+    path = paths.config_file()
+    original = (
+        "# Personal config\r\n"
+        'owner = "angler"  # user-defined setting\r\n'
+        "\r\n"
+        "[vision]\r\n"
+        "icon_size_px = 53  # retired setting\r\n"
+        "\r\n"
+        "[gui]  # display preferences\r\n"
+        "randomize_title\t= false  # title note\r\n"
+        "title_interval_s = 300  # seconds\r\n"
+        "show_preview = false  # unknown GUI setting\r\n"
+        "\r\n"
+        "[future]\r\n"
+        "option = true"
+    )
+    path.write_bytes(original.encode("utf-8"))
+
+    Presenter().save_window_title(True, "45")
+
+    expected = original.replace("randomize_title\t= false", "randomize_title\t= true").replace(
+        "title_interval_s = 300", "title_interval_s = 45"
+    )
+    assert path.read_bytes() == expected.encode("utf-8")
+
+
+@pytest.mark.parametrize(("randomize", "interval"), [(False, "300"), (True, "45")])
+def test_saving_window_title_creates_config_from_default_template(randomize, interval):
+    path = paths.config_file()
+    assert not path.exists()
+
+    Presenter().save_window_title(randomize, interval)
+
+    template = default_config_path().read_text(encoding="utf-8")
+    expected = template.replace(
+        "randomize_title = false", f"randomize_title = {str(randomize).lower()}"
+    )
+    expected = expected.replace("title_interval_s = 300", f"title_interval_s = {interval}")
+    assert path.read_text(encoding="utf-8") == expected
 
 
 @pytest.mark.parametrize("interval", ["", "0", "-1", "1.5", "2147484"])
