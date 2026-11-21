@@ -360,6 +360,17 @@ class FishingEngine:
             if self.behavior.skip_bite():
                 self._miss("Let this bite go on purpose")
                 return
+            if self.behavior.fumble_bite():  # a late press; the fish is gone by then
+                self._wait(self.behavior.fumble_delay_s())
+                if self._stop:
+                    return
+                if not self._ready_to_press():
+                    self._pause(State.WAIT_BITE)
+                    return
+                key = self.cfg.game.interact_key
+                self._press(key, "late")
+                self._miss("Reacted too late; the fish got away")
+                return
             self._wait(self.behavior.reaction_s())
             if self._stop:
                 return
@@ -512,19 +523,24 @@ class FishingEngine:
     def _pause_then_idle(self, did: str) -> None:
         pause = self._rng.uniform(self.cfg.run.pause_min_s, self.cfg.run.pause_max_s)
         rest = self.behavior.break_s(self._clock())
-        if rest > 0 and self.session_s != 0:  # a break never outlasts the session
-            rest = min(rest, max(0.0, self.session_s - self._elapsed()))
+        away = self.behavior.away_s()
+        if rest + away > 0 and self.session_s != 0:  # neither outlasts the session
+            left = max(0.0, self.session_s - self._elapsed())
+            rest = min(rest, left)
+            away = min(away, max(0.0, left - rest))
         if self._time_up():
             nxt = "Time is up; quitting the game" if self.cfg.game.quit_key else "Time is up"
         elif rest > 0:
             nxt = f"Taking a {rest / 60:.1f} min break, then casting again"
+        elif away > 0:
+            nxt = f"Standing around for {away:.0f} s, then casting again"
         else:
             nxt = f"Casting again in {pause:.1f} s"
         self._change(State.IDLE, did, nxt)
         self._icon_xy = None
-        if rest > 0:
+        if rest + away > 0:
             self._return_focus()  # not held through a break; the next cast takes it again
-        self._wait(rest + pause)
+        self._wait(rest + away + pause)
 
     def _wait(self, seconds: float) -> None:
         """Sleep in short slices so Stop still ends the run promptly."""

@@ -159,7 +159,7 @@ Tick **Fish while I use another window** on the Setup tab (`background = true` u
 - **Hyprland:** a game running as a native Wayland window must also stay uncovered on a visible workspace, because the bot can only read the screen there. A game under Xwayland can be covered.
 - **macOS:** the bot brings the game's whole app forward, not one window of it.
 
-To vary the bot's rhythm, fill in the `[behavior]` section of the config file (`wowfish config --path`): breaks after a stretch of fishing, a reaction delay before Interact, the odd bite let go on purpose, uneven key holds, and a jump before the occasional cast. It is all off by default.
+To vary the bot's rhythm, fill in the `[behavior]` section of the config file (`wowfish config --path`): breaks after a stretch of fishing, a reaction delay before Interact, the odd bite let go or fumbled, spells of standing around instead of casting, uneven key holds, and a jump before the occasional cast. It is all off by default.
 
 To close the game when the time limit runs out, make a macro with `/quit`, put it on an action bar key, and enter that key as the Quit key on the Setup tab (`quit_key` in the config file). Once the session is over, the bot lets the cast in hand finish, presses the key, and waits up to 30 s for the game window to close (away from an inn, logging out takes 20 s). If the window stays, it presses again, three times at most.
 

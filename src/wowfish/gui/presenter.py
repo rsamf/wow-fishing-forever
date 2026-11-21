@@ -40,6 +40,8 @@ def describe(event: ev.Event) -> str:
             return f"Pressed {key} to quit the game"
         case ev.KeyPressed(key=key, why="lure"):
             return f"Pressed {key} to put the lure on"
+        case ev.KeyPressed(key=key, why="late"):
+            return f"Pressed {key} too late; the fish got away"
         case ev.KeyPressed(key=key):
             return f"Pressed {key} to interact"
         case ev.Caught():

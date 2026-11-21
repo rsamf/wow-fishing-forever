@@ -668,6 +668,31 @@ def test_fishing_loop_varies_its_rhythm_only_when_asked():
             assert before == "space" and t - jumped_at >= 1.0
 
 
+def test_late_bites_and_standing_around_only_when_asked():
+    """A fumbled bite presses Interact after the fish is gone, and an away spell stands idle for
+    the whole spell. Neither draws anything while its chance is 0."""
+    _, lines = _fish(BehaviorConfig(), 2)
+    assert not any("too late" in line or "Standing around" in line for line in lines)
+
+    behavior = BehaviorConfig(
+        fumble_bite_chance=1.0,
+        fumble_delay_min_ms=1200,
+        fumble_delay_max_ms=1200,
+        away_chance=1.0,
+        away_min_s=30,
+        away_max_s=30,
+    )
+    pond, lines = _fish(behavior, 5)
+    assert any("Pressed f too late; the fish got away" in line for line in lines)
+    assert any("Reacted too late; the fish got away" in line for line in lines)
+    assert any("Standing around for 30 s, then casting again" in line for line in lines)
+    for t in (t for t, key, _ in pond.pressed if key == "f"):
+        heard = max(b for b in pond.bites if b <= t)
+        assert t - heard >= 1.2 - 1e-9  # every Interact comes after the fish is gone
+    gaps = [b[0] - a[0] for a, b in zip(pond.pressed, pond.pressed[1:], strict=False)]
+    assert max(gaps) >= 30  # and the away spell really is spent standing around
+
+
 def test_engine_follows_the_window_it_was_given():
     """Before each cast the bot looks at the picked window again: when it moved or was resized,
     capture opens again on the new spot; when the lookup finds nothing, the last known window

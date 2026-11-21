@@ -87,6 +87,14 @@ class BehaviorConfig:
     reaction_min_ms: int = 0
     reaction_max_ms: int = 0
     skip_bite_chance: float = 0.0
+    # Chance (0..1) of reacting so late the fish is gone; the press still comes, too late.
+    fumble_bite_chance: float = 0.0
+    fumble_delay_min_ms: int = 700
+    fumble_delay_max_ms: int = 1500
+    # Chance (0..1) of standing around after a fish, and how long that lasts.
+    away_chance: float = 0.0
+    away_min_s: float = 20.0
+    away_max_s: float = 90.0
     key_hold_jitter_ms: int = 0
     jump_chance: float = 0.0
     jump_key: str = "space"
@@ -281,10 +289,17 @@ def _validate(path: Path, cfg: Config) -> None:
         ("break_every_min_minutes", "break_every_max_minutes"),
         ("break_min_minutes", "break_max_minutes"),
         ("reaction_min_ms", "reaction_max_ms"),
+        ("fumble_delay_min_ms", "fumble_delay_max_ms"),
     ):
         check(getattr(b, lo) >= 0, f"behavior.{lo}", "must be 0 or positive")
         check(getattr(b, lo) <= getattr(b, hi), f"behavior.{lo}", f"must not exceed behavior.{hi}")
     check(0.0 <= b.skip_bite_chance < 1.0, "behavior.skip_bite_chance", "must be in [0, 1)")
+    check(0.0 <= b.fumble_bite_chance < 1.0, "behavior.fumble_bite_chance", "must be in [0, 1)")
+    check(0.0 <= b.away_chance < 1.0, "behavior.away_chance", "must be in [0, 1)")
+    check(b.away_min_s >= 0, "behavior.away_min_s", "must be 0 or positive")
+    check(
+        b.away_min_s <= b.away_max_s, "behavior.away_min_s", "must not exceed behavior.away_max_s"
+    )
     check(0.0 <= b.jump_chance <= 1.0, "behavior.jump_chance", "must be in [0, 1]")
     check(
         b.key_hold_jitter_ms >= 0 and r.key_hold_ms - b.key_hold_jitter_ms >= 10,

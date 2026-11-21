@@ -62,11 +62,22 @@ break_every_max_minutes = 0.0
 break_min_minutes = 0.0
 break_max_minutes = 0.0
 # Wait a random number of milliseconds between these two after hearing the splash, before
-# pressing Interact. Keep it under a second or so, or the fish gets away.
+# pressing Interact. Most presses land near the low end and the rest form a tail, the way a
+# person's do. Keep it under a second or so, or the fish gets away.
 reaction_min_ms = 0
 reaction_max_ms = 0
 # Chance (0..1) of letting a bite go on purpose, as if it was missed.
 skip_bite_chance = 0.0
+# Chance (0..1) of reacting so late the fish is gone: Interact comes anyway, after a random
+# delay between these two milliseconds.
+fumble_bite_chance = 0.0
+fumble_delay_min_ms = 700
+fumble_delay_max_ms = 1500
+# Chance (0..1) of standing around after a fish before casting again, for a random number of
+# seconds between these two: a stretch of the run that is not fishing at all.
+away_chance = 0.0
+away_min_s = 20.0
+away_max_s = 90.0
 # Hold each key for run.key_hold_ms, give or take up to this many milliseconds.
 key_hold_jitter_ms = 0
 # Chance (0..1) of jumping in place before a cast, and the Jump keybind.
