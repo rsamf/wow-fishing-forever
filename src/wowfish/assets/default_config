@@ -17,6 +17,11 @@ quit_key = ""
 lure_key = ""
 # How long the lure's buff lasts, in minutes.
 lure_minutes = 10.0
+# Keybind for a periodic macro (e.g. opening boxes, clams, or shells). Pressed between casts
+# every macro_minutes. Empty = off.
+macro_key = ""
+# How often to press macro_key, in minutes.
+macro_minutes = 1.0
 
 [vision]
 # Frames wider than this are downscaled before matching.
@@ -47,6 +52,8 @@ pause_max_s = 2.0
 key_hold_ms = 60
 # Seconds to wait after pressing lure_key for the lure to finish applying before casting.
 lure_cast_s = 6.0
+# Seconds to wait after pressing macro_key before the next cast.
+macro_wait_s = 1.5
 # true = keep fishing while you use another window: on a splash the bot brings the game to the
 # front, presses Interact, loots, casts again and gives focus back. Needs "Sound in Background"
 # on in the game. false = the bot pauses whenever the game is not the focused window.

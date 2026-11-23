@@ -115,6 +115,7 @@ class FishingEngine:
         self._last_scores_sent = 0.0
         self._best_heard: tuple[str, float] = ("", -1.0)  # best clip score since the icon was found
         self._lure_at: float | None = None  # when the lure last finished applying
+        self._macro_at: float | None = None  # when the periodic macro was last pressed
 
     # -- public ------------------------------------------------------------------------------
 
@@ -258,6 +259,9 @@ class FishingEngine:
     def _cast(self, now: float) -> None:
         if self._lure_due(now):
             self._apply_lure()
+            return  # still IDLE: the next step casts
+        if self._macro_due(now):
+            self._run_macro()
             return  # still IDLE: the next step casts
         self._follow_window()
         if self.behavior.jump():
@@ -420,6 +424,27 @@ class FishingEngine:
         )
         self._wait(wait)
         self._lure_at = self._clock()
+
+    # -- periodic macro ----------------------------------------------------------------------
+
+    def _macro_due(self, now: float) -> bool:
+        if not self.cfg.game.macro_key:
+            return False
+        if self._macro_at is None:
+            self._macro_at = self.started if self.started is not None else now
+        return now - self._macro_at >= self.cfg.game.macro_minutes * 60.0
+
+    def _run_macro(self) -> None:
+        """Press the optional periodic macro (e.g. opening boxes or shells) and wait briefly."""
+        key, wait = self.cfg.game.macro_key, self.cfg.run.macro_wait_s
+        self._press(key, "macro")
+        self._change(
+            State.IDLE,
+            f"Pressed {key} for periodic macro",
+            f"Casting in {wait:g} s; next macro in {self.cfg.game.macro_minutes:g} min",
+        )
+        self._wait(wait)
+        self._macro_at = self._clock()
 
     # -- helpers -----------------------------------------------------------------------------
 

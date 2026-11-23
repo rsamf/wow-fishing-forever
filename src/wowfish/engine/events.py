@@ -50,7 +50,7 @@ class BiteHeard(Event):
 @dataclass(frozen=True)
 class KeyPressed(Event):
     key: str
-    why: str  # "cast" | "bite" | "jump" | "quit" | "lure"
+    why: str  # "cast" | "bite" | "jump" | "quit" | "lure" | "macro"
 
 
 @dataclass(frozen=True)
