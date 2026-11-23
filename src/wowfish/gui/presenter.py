@@ -11,7 +11,7 @@ from typing import Any
 from loguru import logger
 
 from wowfish.audio import AudioUnavailable
-from wowfish.config import Config, load_config, save_config
+from wowfish.config import DEFAULT_WINDOW_TITLE, Config, load_config, save_config
 from wowfish.engine import events as ev
 from wowfish.engine.state import State
 from wowfish.engine.thread import EngineThread
@@ -119,6 +119,15 @@ class Presenter:
 
     def reload(self) -> None:
         self.cfg = load_config()[0]
+
+    def save_window_title(self, title: str) -> str:
+        """Save the window title used to preselect the game; empty defaults to English."""
+        cleaned = title.strip() or DEFAULT_WINDOW_TITLE
+        self.reload()
+        if cleaned != self.cfg.game.window_title:
+            save_config(replace(self.cfg, game=replace(self.cfg.game, window_title=cleaned)))
+            self.reload()
+        return self.cfg.game.window_title
 
     def save_keys(
         self, cast_key: str, interact_key: str, quit_key: str = "", lure_key: str = ""

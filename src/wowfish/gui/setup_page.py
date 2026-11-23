@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from wowfish.capture import linux_hyprland
+from wowfish.config import DEFAULT_WINDOW_TITLE
 from wowfish.gui.presenter import Presenter
 
 CHECKLIST = (
@@ -55,6 +56,22 @@ class SetupPage:
         self.frame = tb.Frame(parent, padding=10)
         f = self.frame
         tb.Label(f, text=CHECKLIST, justify="left").pack(anchor="w", pady=(0, 10))
+
+        window_row = tb.Labelframe(f, text="Game window", padding=8)
+        window_row.pack(fill="x", pady=4)
+        tb.Label(window_row, text="Window title").pack(side="left")
+        self.window_title = tb.Entry(window_row, width=28)
+        self.window_title.insert(0, presenter.cfg.game.window_title)
+        self.window_title.pack(side="left", padx=6)
+        self.window_title.bind("<Return>", lambda _e: self._save_title())
+        tb.Button(window_row, text="Save", command=self._save_title, bootstyle="secondary").pack(
+            side="left"
+        )
+        self.title_note = tb.Label(
+            window_row,
+            text=f'Preselects the game window (empty = "{DEFAULT_WINDOW_TITLE}").',
+        )
+        self.title_note.pack(side="left", padx=6)
 
         keys_row = tb.Labelframe(f, text="Keys", padding=8)
         keys_row.pack(fill="x", pady=4)
@@ -154,6 +171,16 @@ class SetupPage:
         self.bite_note.pack(side="left", padx=6)
 
     # -- actions ----------------------------------------------------------------------------
+
+    def _save_title(self) -> None:
+        raw = self.window_title.get()
+        saved = self.p.save_window_title(raw)
+        self.window_title.delete(0, "end")
+        self.window_title.insert(0, saved)
+        if not raw.strip():
+            self.title_note.configure(text=f"saved default ({saved})")
+        else:
+            self.title_note.configure(text=f"saved ({saved})")
 
     def _save_keys(self) -> None:
         try:

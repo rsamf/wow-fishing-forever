@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from wowfish.capture.choices import window_choices
 from wowfish.gui import image
 from wowfish.gui.presenter import Presenter, View
 from wowfish.gui.score_graph import ScoreGraph
@@ -71,7 +72,9 @@ class FishPage:
             self.blockers.configure(text="; ".join(reasons))
             return
         self.blockers.configure(text="")
-        pick_window(self.frame, self._start_with)
+        self.p.reload()
+        title = self.p.cfg.game.window_title
+        pick_window(self.frame, self._start_with, choices=lambda: window_choices(title))
 
     def _start_with(self, window: Any) -> None:
         if window is None:

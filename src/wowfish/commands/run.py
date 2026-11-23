@@ -36,7 +36,7 @@ def run(
     """Cast, find the bobber, hear the splash, press Interact, loot, repeat. Ctrl-C stops."""
     cfg = load_config_or_fail()
     preflight_or_fail()
-    window = pick_window_or_fail()
+    window = pick_window_or_fail(title=cfg.game.window_title)
     try:
         engine = build_engine(
             cfg,

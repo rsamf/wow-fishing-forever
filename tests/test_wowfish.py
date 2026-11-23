@@ -41,10 +41,11 @@ from wowfish.capture._wayland import (
     hyprland_windows,
     refresh_hyprland,
 )
-from wowfish.capture.choices import WindowChoice, order_choices
+from wowfish.capture.choices import WindowChoice, order_choices, window_choices
 from wowfish.cli import _setup_logging, app
 from wowfish.commands._common import pick_window_or_fail
 from wowfish.config import (
+    DEFAULT_WINDOW_TITLE,
     AudioConfig,
     BehaviorConfig,
     Config,
@@ -96,6 +97,32 @@ def test_default_config_matches_code_defaults(tmp_path):
 
     save_config(from_file, path)
     assert load_config(path) == (from_file, [])
+
+
+def test_window_title_config_defaults_and_persists_unicode(tmp_path, monkeypatch):
+    """The configured game window title defaults to English, saves and loads Unicode titles
+    such as Chinese cleanly, falls back to English when cleared, and drives window-picker order."""
+    monkeypatch.setenv("WOWFISH_HOME", str(tmp_path))
+    p = Presenter()
+    assert p.cfg.game.window_title == DEFAULT_WINDOW_TITLE
+
+    assert p.save_window_title("  魔獸世界  ") == "魔獸世界"
+    assert p.cfg.game.window_title == "魔獸世界"
+    assert load_config()[0].game.window_title == "魔獸世界"
+
+    zh = WindowRef("魔獸世界", 77, 0, 0, 1920, 1080, handle=1)
+    browser = WindowRef("Firefox", 60, 0, 0, 2560, 1440, handle=2)
+    monkeypatch.setattr(capture, "_platform_windows", lambda: [browser, zh])
+    choices = window_choices(p.cfg.game.window_title)
+    assert [(c.window.title, c.guess) for c in choices] == [("魔獸世界", True), ("Firefox", False)]
+
+    assert p.save_window_title("") == DEFAULT_WINDOW_TITLE
+    assert p.save_window_title("   ") == DEFAULT_WINDOW_TITLE
+    assert load_config()[0].game.window_title == DEFAULT_WINDOW_TITLE
+
+    cfg_path = tmp_path / "config" / "config.toml"
+    cfg_path.write_text('[game]\nwindow_title = ""\n', encoding="utf-8")
+    assert load_config(cfg_path)[0].game.window_title == DEFAULT_WINDOW_TITLE
 
 
 def test_older_config_gains_new_settings_at_launch(tmp_path, monkeypatch):

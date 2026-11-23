@@ -16,6 +16,7 @@ from tomlkit.items import Comment, Key, Table, Whitespace
 
 from wowfish import paths
 from wowfish.assets import default_config_path
+from wowfish.capture import GAME_TITLE as DEFAULT_WINDOW_TITLE
 from wowfish.input.keys import is_supported_key
 
 _LINE_RE = re.compile(r"\(at line (\d+), column \d+\)")
@@ -44,6 +45,7 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class GameConfig:
+    window_title: str = DEFAULT_WINDOW_TITLE
     cast_key: str = "1"
     interact_key: str = "f"
     session_minutes: int = 0
@@ -52,6 +54,10 @@ class GameConfig:
     lure_key: str = ""
     # How long the lure lasts; it is put on again once this has passed.
     lure_minutes: float = 10.0
+
+    def __post_init__(self) -> None:
+        cleaned = self.window_title.strip()
+        object.__setattr__(self, "window_title", cleaned or DEFAULT_WINDOW_TITLE)
 
 
 @dataclass(frozen=True)
@@ -200,7 +206,7 @@ def load_config(path: Path | None = None) -> tuple[Config, list[str]]:
     if not path.exists():
         return Config(game=GameConfig(), vision=VisionConfig(), audio=AudioConfig()), []
     try:
-        raw = tomllib.loads(path.read_text())
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
         m = _LINE_RE.search(str(e))
         raise ConfigError(path, str(e), int(m.group(1)) if m else None) from e
@@ -221,7 +227,7 @@ def load_config(path: Path | None = None) -> tuple[Config, list[str]]:
 
 def save_config(cfg: Config, path: Path | None = None) -> None:
     path = path or paths.config_file()
-    path.write_text(to_toml(cfg))
+    path.write_text(to_toml(cfg), encoding="utf-8")
 
 
 def _build_section(

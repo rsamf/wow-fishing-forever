@@ -42,7 +42,10 @@ def preflight_or_fail() -> None:
 
 
 def pick_window_or_fail(
-    choices: list[WindowChoice] | None = None, *, ask: Callable[[str], str] = input
+    choices: list[WindowChoice] | None = None,
+    *,
+    title: str | None = None,
+    ask: Callable[[str], str] = input,
 ) -> WindowRef:
     """List the open windows by number and return the one the user types (Enter = the first).
 
@@ -51,10 +54,11 @@ def pick_window_or_fail(
     from wowfish.errors import NotSupported
 
     if choices is None:
+        from wowfish.capture import GAME_TITLE
         from wowfish.capture.choices import window_choices
 
         try:
-            choices = window_choices()
+            choices = window_choices((title or "").strip() or GAME_TITLE)
         except (NotSupported, OSError) as e:
             fail(str(e))
     if not choices:

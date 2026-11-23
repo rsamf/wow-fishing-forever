@@ -1,6 +1,8 @@
 # wowfish configuration. Delete any line to go back to its default.
 
 [game]
+# Window title used to preselect the game in the window picker. Empty = "World of Warcraft".
+window_title = "World of Warcraft"
 # Keybind for the Fishing ability on your action bar.
 cast_key = "1"
 # Keybind for Interact With Target (Options > Keybindings > Targeting).
