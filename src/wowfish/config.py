@@ -64,6 +64,8 @@ class AudioConfig:
     device: str = ""  # macOS only: the input device that carries the game ("" = BlackHole)
     bite_threshold: float = 0.66
     refractory_s: float = 3.0
+    # Linux only: pass --raw to pw-record (legacy; default output is already raw).
+    raw: bool = False
 
 
 @dataclass(frozen=True)

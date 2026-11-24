@@ -98,6 +98,7 @@ def open_game_audio(
     *,
     sample_rate: int = 22050,
     blocksize: int = 1024,
+    raw: bool = False,
 ) -> Any:
     """The audio of the app that owns `window`; on macOS, the input `device` instead."""
     if not audio_follows_window():
@@ -107,7 +108,7 @@ def open_game_audio(
     if sys.platform == "linux":
         from wowfish.audio._pipewire import open_app_stream
 
-        return open_app_stream(window, sample_rate=sample_rate, blocksize=blocksize)
+        return open_app_stream(window, sample_rate=sample_rate, blocksize=blocksize, raw=raw)
     if window.pid is None:
         raise AudioUnavailable(
             f"cannot tell which process owns {window.title!r}; pick another window"
