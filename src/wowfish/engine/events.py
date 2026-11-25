@@ -23,8 +23,6 @@ class StateChanged(Event):
 
 @dataclass(frozen=True)
 class IconFound(Event):
-    thumbnail: np.ndarray  # the full frame fed to the matcher, <= 480 px wide, BGR
-    box: tuple[int, int, int, int]  # x, y, w, h in thumbnail pixels
     score: float
     size: int  # icon side in window pixels
     where: tuple[int, int]  # icon centre in window pixels
@@ -34,6 +32,19 @@ class IconFound(Event):
 class Calibrated(Event):
     size: int  # icon side in window pixels, measured on this frame
     score: float
+
+
+@dataclass(frozen=True)
+class Preview(Event):
+    """The game window as the bot sees it, every `preview_s`, for the GUI's live picture (not
+    logged)."""
+
+    frame: np.ndarray  # the whole window, <= PREVIEW_WIDTH px wide, BGR
+    # x, y, w, h in `frame` pixels: the gear being followed, or, while one is looked for, the
+    # best match so far; None when there is neither
+    box: tuple[int, int, int, int] | None
+    score: float | None = None  # the best match's score; None when `box` is the followed gear
+    scan: float | None = None  # how far a scan for the gear's size is, 0..1; None = none running
 
 
 @dataclass(frozen=True)
@@ -62,7 +73,9 @@ class Caught(Event):
 class Timeout(Event):
     what: str  # "icon" | "bite" | "loot"
     after_s: float
-    detail: str = ""  # for "bite": the best match heard while waiting, so a miss explains itself
+    # so a miss explains itself. "bite": the best match heard while waiting; "icon": a scan that
+    # outlasted the timeout
+    detail: str = ""
 
 
 @dataclass(frozen=True)

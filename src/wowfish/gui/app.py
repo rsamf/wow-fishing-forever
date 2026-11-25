@@ -18,7 +18,7 @@ class App:
 
         self.p = presenter or Presenter()
         self.root = tb.Window(
-            themename="bootstrap-dark", title=f"wowfish {__version__}", minsize=(900, 640)
+            themename="bootstrap-dark", title=f"wowfish {__version__}", minsize=(900, 760)
         )
         nb = tb.Notebook(self.root)
         nb.pack(fill="both", expand=True, padx=8, pady=8)

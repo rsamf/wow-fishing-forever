@@ -36,9 +36,10 @@ class IconSearch:
         self.region = None
         self._misses = 0
 
-    def step(self, frame_bgr: np.ndarray) -> tuple[Phase, IconMatch]:
+    def step(self, frame_bgr: np.ndarray, zone: Region | None = None) -> tuple[Phase, IconMatch]:
+        """`zone` limits where the icon is acquired; once tracked, its own box is used."""
         phase = self.phase
-        match = self.matcher.match(frame_bgr, self.region)
+        match = self.matcher.match(frame_bgr, self.region or zone)
         if match.accepted(self.threshold):
             h, w = frame_bgr.shape[:2]
             self.region = Region.around(match.x, match.y, w, h, self.margin)

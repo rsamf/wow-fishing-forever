@@ -28,10 +28,10 @@ from wowfish.engine import events as ev
 from wowfish.engine.behavior import Behavior
 from wowfish.engine.state import State
 from wowfish.vision.matcher import ICON_THRESHOLD, IconMatch
-from wowfish.vision.region import Region
+from wowfish.vision.region import FULL, Region
 from wowfish.vision.search import IconSearch
 
-THUMB_WIDTH = 480
+PREVIEW_WIDTH = 1280  # the live picture's width; the GUI scales it to the room it has
 AUDIO_BLOCK = 1024
 AUDIO_MAX_S = 2.0  # never read more than this at once; the device buffer may drop older audio
 STATS_EVERY_S = 10.0
@@ -68,6 +68,8 @@ class FishingEngine:
         session_s: float | None = None,
         box_interval_s: float = 0.25,
         lost_after: int = 3,
+        preview_s: float = 0.0,
+        zone: Region = FULL,
     ) -> None:
         self.cfg = cfg
         self.window = window
@@ -83,6 +85,12 @@ class FishingEngine:
         self.matcher = matcher
         self.search = IconSearch(self.matcher, self.threshold) if self.matcher else None
         self._sweeping = True
+        self.zone = zone  # where a new gear is looked for; the GUI narrows it while running
+        self.preview_s = preview_s  # send the window as a Preview this often; 0 = never
+        self._last_preview = -math.inf
+        self._candidate: IconMatch | None = None  # while a gear is looked for: the best match yet
+        self._scan_s = 0.0  # this cast's longest scan for the gear's size
+        self._scan_in_time = False  # ...and whether one finished inside the icon timeout
         self._icon_timeouts = 0
         self._clock = clock
         self._sleep = sleep
@@ -120,6 +128,10 @@ class FishingEngine:
 
     def stop(self) -> None:
         self._stop = True
+
+    def set_zone(self, zone: Region) -> None:
+        """Look for the gear only inside `zone` from now on; safe to call from another thread."""
+        self.zone = zone
 
     def run(self) -> None:
         self.capturer.open(self.window)
@@ -159,6 +171,8 @@ class FishingEngine:
     # -- the loop body -----------------------------------------------------------------------
 
     def _step(self, now: float) -> None:
+        if self.state is not State.CASTING:  # there the picture is the frame the cast looks at
+            self._maybe_preview(now)
         background = self.cfg.run.background
         if not self._asked_focus:  # every run starts by bringing the game to the front
             self._asked_focus = True
@@ -281,6 +295,7 @@ class FishingEngine:
             self.stats.bites_heard, self._elapsed(),
         )  # fmt: skip
         self._t_cast = now
+        self._candidate, self._scan_s, self._scan_in_time = None, 0.0, False
         if self.search is not None:
             self.search.reset()
         limit = self.cfg.run.icon_timeout_s
@@ -292,27 +307,55 @@ class FishingEngine:
 
     def _acquire(self, now: float) -> None:
         frame = self.capturer.grab()
+        self._maybe_preview(now, frame)
+        zone = self.zone  # read once: the GUI may swap it mid-pass
         if self.search is not None:  # fast path: the last measured size
-            _, m = self.search.step(frame)
+            _, m = self.search.step(frame, zone)
             if m.accepted(self.threshold):
                 self._icon_timeouts = 0
                 self._sweeping = False
                 self._found(frame, m)
                 return
+            self._note_candidate(m)
         landed = now - self._t_cast >= MEASURE_AFTER_S
         if landed and (self._sweeping or self.search is None):
-            cal = self._calibrate(frame, match_width=self.cfg.vision.match_width)
+            began = self._clock()
+
+            def progress(done: float, best: IconMatch | None) -> None:
+                # the scan holds this thread for seconds: keep the live picture coming from here
+                self._note_candidate(best)
+                self._maybe_preview(self._clock(), frame, done)
+
+            cal = self._calibrate(
+                frame, match_width=self.cfg.vision.match_width, zone=zone, progress=progress
+            )
+            ended = self._clock()
+            self._scan_s = max(self._scan_s, ended - began)
+            self._scan_in_time |= ended - self._t_cast <= self.cfg.run.icon_timeout_s
+            m = IconMatch(cal.score, cal.x, cal.y, cal.icon_size_px, cal.gold)
             if cal.valid and not self._was_there_before_cast(cal):
                 self._use_calibration(cal)
                 self._icon_timeouts = 0
-                self._found(frame, IconMatch(cal.score, cal.x, cal.y, cal.icon_size_px, cal.gold))
+                self._found(frame, m)
                 return
+            self._note_candidate(m)
         if now - self._t_cast > self.cfg.run.icon_timeout_s:
-            self._emit(ev.Timeout(self._t(), "icon", self.cfg.run.icon_timeout_s))
+            # Not one scan finished in time: the zone is too large for this computer.
+            detail = ""
+            if self._scan_s > 0 and not self._scan_in_time:
+                detail = (
+                    f"a scan took {self._scan_s:.1f} s, longer than the "
+                    f"{self.cfg.run.icon_timeout_s:g} s allowed; shrink the icon detection zone"
+                )
+            self._emit(ev.Timeout(self._t(), "icon", self.cfg.run.icon_timeout_s, detail))
             self._icon_timeouts += 1
             if self._icon_timeouts >= RESWEEP_AFTER_TIMEOUTS:
                 self._sweeping = True
-            self._miss("No gear icon over the bobber")
+            self._miss(f"No gear icon: {detail}" if detail else "No gear icon over the bobber")
+
+    def _note_candidate(self, m: IconMatch | None) -> None:
+        if m is not None and m.score > 0:
+            self._candidate = m
 
     def _was_there_before_cast(self, cal: Any) -> bool:
         """Whether the measured icon already showed, same size and place, before the cast."""
@@ -338,8 +381,9 @@ class FishingEngine:
         self._icon_size = m.size
         self._misses = 0
         self._last_box_grab = self._clock()  # the full frame just confirmed it; look again later
-        thumb, box = _thumbnail(frame, m.x, m.y, m.size)
-        self._emit(ev.IconFound(self._t(), thumb, box, float(m.score), int(m.size), (m.x, m.y)))
+        self._emit(ev.IconFound(self._t(), float(m.score), int(m.size), (m.x, m.y)))
+        self._last_preview = -math.inf  # show the box around it at once
+        self._maybe_preview(self._clock(), frame)
         self.detector.reset()
         self._best_heard = ("", -1.0)
         self._last_listen = self._last_scores_sent = self._clock()
@@ -521,7 +565,7 @@ class FishingEngine:
         else:
             nxt = f"Casting again in {pause:.1f} s"
         self._change(State.IDLE, did, nxt)
-        self._icon_xy = None
+        self._icon_xy = self._candidate = None
         if rest > 0:
             self._return_focus()  # not held through a break; the next cast takes it again
         self._wait(rest + pause)
@@ -533,6 +577,44 @@ class FishingEngine:
             step = min(SLEEP_SLICE_S, remaining)
             self._sleep(step)
             remaining -= step
+            self._maybe_preview(self._clock())
+
+    def _maybe_preview(
+        self, now: float, frame: np.ndarray | None = None, scan: float | None = None
+    ) -> None:
+        """Send the live picture when one is due: `frame` when the caller has just grabbed one,
+        else a grab of its own. `scan` is how far a scan of `frame` is. A grab that fails only
+        skips a beat here: the loop's own grabs report what is wrong."""
+        if not self.preview_s or now - self._last_preview < self.preview_s:
+            return
+        self._last_preview = now
+        if frame is None:
+            try:
+                frame = self.capturer.grab()
+            except Exception:
+                return
+        h, w = frame.shape[:2]
+        scale = min(1.0, PREVIEW_WIDTH / w)
+        if scale < 1.0:
+            size = (round(w * scale), round(h * scale))
+            frame = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
+        box = score = None
+        if self._icon_xy is not None:
+            x, y, side = *self._icon_xy, self._icon_size
+        elif self._candidate is not None:
+            c = self._candidate
+            x, y, side, score = c.x, c.y, c.size, float(c.score)
+        else:
+            side = 0
+        if side:
+            side = max(2, round(side * scale))
+            box = (
+                max(0, round(x * scale - side / 2)),
+                max(0, round(y * scale - side / 2)),
+                side,
+                side,
+            )
+        self._emit(ev.Preview(self._t(), frame, box, score, scan))
 
     def _drain_audio(self, now: float) -> list[AudioChunk]:
         rate = self.audio.sample_rate
@@ -600,21 +682,6 @@ class FishingEngine:
         return self._elapsed()
 
 
-def _thumbnail(frame: np.ndarray, x: int, y: int, size: int) -> tuple[np.ndarray, Box]:
-    h, w = frame.shape[:2]
-    scale = min(1.0, THUMB_WIDTH / w)
-    if scale < 1.0:
-        thumb = cv2.resize(
-            frame, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA
-        )
-    else:
-        thumb = frame.copy()
-    side = max(2, round(size * scale))
-    bx = max(0, round(x * scale - side / 2))
-    by = max(0, round(y * scale - side / 2))
-    return thumb, (bx, by, side, side)
-
-
 def unsupported_platform() -> str:
     """Why the bot cannot run here, or "" when it can (Linux X11/Xwayland/Hyprland, Windows,
     macOS)."""
@@ -668,6 +735,8 @@ def build_engine(
     window: WindowRef,
     *,
     session_s: float | None = None,
+    preview_s: float = 0.0,
+    zone: Region = FULL,
 ) -> FishingEngine:
     """Wire the real capturer, input device, audio source, detector, and matcher for `cfg`.
 
@@ -702,11 +771,17 @@ def build_engine(
         matcher_factory=matcher_factory,
         refresh_window=refresh_window,
         session_s=session_s,
+        preview_s=preview_s,
+        zone=zone,
     )
 
 
-def _real_calibrate(frame: np.ndarray, *, match_width: int = 1920) -> Any:
+def _real_calibrate(
+    frame: np.ndarray, *, match_width: int = 1920, zone: Region = FULL, progress: Any = None
+) -> Any:
     from wowfish.vision.calibrate import calibrate_icon_scale
     from wowfish.vision.template import load_icon_templates
 
-    return calibrate_icon_scale(frame, load_icon_templates(), match_width=match_width)
+    return calibrate_icon_scale(
+        frame, load_icon_templates(), match_width=match_width, zone=zone, progress=progress
+    )

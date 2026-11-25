@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 
 import numpy as np
 
 from wowfish.vision.matcher import GOLD_MIN, NO_MATCH, IconMatch, IconMatcher
-from wowfish.vision.region import Region
+from wowfish.vision.region import FULL, Region
 from wowfish.vision.template import IconTemplate, template_for_size
 
 # Dense enough that every size is within ~15% of a probe: a gear's score falls >= 0.25 at 0.8x
@@ -58,6 +58,8 @@ def calibrate_icon_scale(
     match_width: int = 1920,
     probe_sizes: Sequence[int] = PROBE_SIZES,
     anchors: int = ANCHORS,
+    zone: Region = FULL,
+    progress: Callable[[float, IconMatch | None], None] | None = None,
 ) -> Calibration:
     """Locate candidate spots with a few probe sizes, then sweep every size around each.
 
@@ -67,7 +69,10 @@ def calibrate_icon_scale(
     after a chance-level penalty of SIZE_PENALTY / size. Templates below the match-space floor
     (see matcher.MIN_TEMPLATE_PX) never match, and the winner must out-score its own off-scale
     probes by PROMINENCE_MIN to count as valid: a blob scores the same at every size, a gear
-    does not.
+    does not. Only `zone` is searched: the probes run inside it and no sweep leaves it.
+
+    `progress`, when given, is called after every match with the share of the work done so far
+    (0..1) and the best gold match so far, if any.
     """
     h, w = frame_bgr.shape[:2]
     sizes = list(sizes)
@@ -76,7 +81,26 @@ def calibrate_icon_scale(
     def run(side: int, region: Region | None = None) -> IconMatch:
         return IconMatcher(template_for_size(templates, side), match_width).match(frame_bgr, region)
 
-    probes = sorted((run(s) for s in probe_sizes), key=_ranked, reverse=True)
+    # For `progress`, work is counted in pixels matched: a probe covers the zone, a sweep step a
+    # small box.
+    zone_px = (zone.right - zone.left) * w * (zone.bottom - zone.top) * h
+    probe_px = zone_px * len(probe_sizes)
+    box_px = min(zone_px, (2.0 * pad) ** 2)
+    probe_share = probe_px / (probe_px + anchors * len(sizes) * box_px)
+    top: IconMatch | None = None  # the best gold match so far, for `progress`
+
+    def tell(done: float, m: IconMatch) -> None:
+        nonlocal top
+        if _ranked(m) > NO_MATCH and (top is None or m.score > top.score):
+            top = m
+        if progress is not None:
+            progress(done, top)
+
+    probes = []
+    for i, s in enumerate(probe_sizes, 1):
+        probes.append(run(s, zone))
+        tell(probe_share * i / len(probe_sizes), probes[-1])
+    probes.sort(key=_ranked, reverse=True)
     spots: list[tuple[int, int]] = []
     for m in probes:
         if _ranked(m) <= NO_MATCH:
@@ -86,21 +110,24 @@ def calibrate_icon_scale(
         if len(spots) == anchors:
             break
     if not spots:
-        spots = [(w // 2, h // 2)]
+        spots = [(round((zone.left + zone.right) / 2 * w), round((zone.top + zone.bottom) / 2 * h))]
 
     best_side, best, best_key, best_region = sizes[0], None, -np.inf, None
+    steps, step = len(spots) * len(sizes), 0
     for ax, ay in spots:
         region = Region(
-            max(0.0, (ax - pad) / w),
-            max(0.0, (ay - pad) / h),
-            min(1.0, (ax + pad) / w),
-            min(1.0, (ay + pad) / h),
+            max(zone.left, (ax - pad) / w),
+            max(zone.top, (ay - pad) / h),
+            min(zone.right, (ax + pad) / w),
+            min(zone.bottom, (ay + pad) / h),
         )
         for side in sizes:
             m = run(side, region)
             key = _ranked(m) - SIZE_PENALTY / side
             if key > best_key:
                 best_side, best, best_key, best_region = side, m, key, region
+            step += 1
+            tell(probe_share + (1.0 - probe_share) * step / steps, m)
     assert best is not None and best_region is not None
     off = [run(max(1, round(best_side * k)), best_region).score for k in OFF_SCALE]
     off = [s for s in off if s > NO_MATCH]

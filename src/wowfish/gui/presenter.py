@@ -15,8 +15,10 @@ from wowfish.config import Config, load_config, save_config
 from wowfish.engine import events as ev
 from wowfish.engine.state import State
 from wowfish.engine.thread import EngineThread
-from wowfish.gui import image
 from wowfish.input import keys
+from wowfish.vision.region import FULL, Region
+
+PREVIEW_S = 0.2  # the Fish tab's live picture: five a second
 
 
 def describe(event: ev.Event) -> str:
@@ -44,6 +46,8 @@ def describe(event: ev.Event) -> str:
             return f"Pressed {key} to interact"
         case ev.Caught():
             return "Caught something; the bobber is gone"
+        case ev.Timeout(what="icon", after_s=s, detail=detail) if detail:
+            return f"No gear icon within {s:g} s: {detail}; recasting"
         case ev.Timeout(what="icon", after_s=s):
             return f"No gear icon within {s:g} s; recasting"
         case ev.Timeout(what="bite", after_s=s, detail=detail) if detail:
@@ -86,7 +90,7 @@ class View:
     did: str
     next: str
     stats: str
-    thumbnail_png: bytes | None
+    preview: ev.Preview | None  # the newest live picture; None before the first
     running: bool
     new_lines: list[str] = field(default_factory=list)
     trace: ScoreTrace = field(default_factory=ScoreTrace)
@@ -111,9 +115,12 @@ class Presenter:
         self.did = "Not started"
         self.next = "Press Start when the game is at the water"
         self.stats = ev.Stats(0.0).as_line()
-        self.thumbnail_png: bytes | None = None
+        self.preview: ev.Preview | None = None
         self._before_pause: tuple[str, str, str] | None = None
         self.trace = ScoreTrace()
+        # Where the bot looks for the gear. Dragged on the live picture; kept until the app
+        # closes, never saved.
+        self.zone: Region = FULL
 
     # -- config -----------------------------------------------------------------------------
 
@@ -211,7 +218,7 @@ class Presenter:
             return
         self.reload()
         try:
-            engine = self._build_engine(self.cfg, window)
+            engine = self._build_engine(self.cfg, window, preview_s=PREVIEW_S, zone=self.zone)
         except Exception as e:
             self._failures.put(f"Cannot start: {e}")
             return
@@ -224,6 +231,12 @@ class Presenter:
     def stop(self) -> None:
         if self._thread is not None:
             self._thread.stop()
+
+    def set_zone(self, zone: Region) -> None:
+        """Look for the gear only inside `zone`; a running bot uses it from its next look."""
+        self.zone = zone
+        if self._thread is not None:
+            self._thread.engine.set_zone(zone)
 
     def shutdown(self) -> None:
         if self._thread is not None:
@@ -242,18 +255,23 @@ class Presenter:
                 if isinstance(event, ev.Scores):  # the graph's feed: not a log line
                     self._add_scores(event)
                     continue
+                if isinstance(event, ev.Preview):  # the live picture: only the newest is shown
+                    self.preview = event
+                    continue
                 lines.append(describe(event))
                 logger.debug(lines[-1])
                 self._apply(event)
             if not self._thread.is_alive() and q.empty():
                 self._thread = None
+        if self.preview is not None and self.preview.scan is not None and not self.running:
+            self.preview = replace(self.preview, scan=None)  # stopped mid-scan: no bar left up
         while True:
             try:
                 lines.append(self._failures.get_nowait())
             except queue.Empty:
                 break
         return View(
-            self.state, self.did, self.next, self.stats, self.thumbnail_png, self.running,
+            self.state, self.did, self.next, self.stats, self.preview, self.running,
             lines, self.trace,
         )  # fmt: skip
 
@@ -266,8 +284,7 @@ class Presenter:
         match event:
             case ev.StateChanged(state=state, did=did, next=nxt):
                 self.state, self.did, self.next = state.name, did, nxt
-            case ev.IconFound(thumbnail=thumb, box=box):
-                self.thumbnail_png = image.bgr_to_png_bytes(image.with_box(thumb, box))
+            case ev.IconFound():
                 self.trace = ScoreTrace(
                     t0=event.t, threshold=self.trace.threshold, version=self.trace.version + 1
                 )

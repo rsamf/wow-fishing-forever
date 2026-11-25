@@ -55,16 +55,19 @@ from wowfish.config import (
     load_config,
     save_config,
 )
+from wowfish.engine import events as ev
 from wowfish.engine.engine import MEASURE_AFTER_S, FishingEngine, unsupported_platform
 from wowfish.engine.state import State
 from wowfish.errors import PermissionMissing
+from wowfish.gui import zone
 from wowfish.gui.presenter import Presenter, describe
 from wowfish.input import _quartz as input_quartz
 from wowfish.input import get_input_device
 from wowfish.input._wayland import keycodes_from_keymap
 from wowfish.input.keys import MAC_KEYCODES, SUPPORTED_KEYS
-from wowfish.vision.calibrate import Calibration
+from wowfish.vision.calibrate import Calibration, calibrate_icon_scale
 from wowfish.vision.matcher import ICON_THRESHOLD, IconMatch, IconMatcher
+from wowfish.vision.region import FULL, Region
 from wowfish.vision.template import load_icon_templates, template_for_size
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -530,6 +533,7 @@ class _Pond:
         self.pressed: list[tuple[float, str, float]] = []  # time, key, hold
         self.bites: list[float] = []
         self.cleared: list[float] = []  # when the engine dropped the buffered audio
+        self.events: list[ev.Event] = []  # everything the engine said, filled in by _fish
 
     def clock(self) -> float:
         return self.t
@@ -547,7 +551,9 @@ class _Pond:
         return np.full((10, 10, 3), 1 if self.bobber or self.decoy else 0, np.uint8)
 
     def match(self, frame, region=None, full_width=None) -> IconMatch:
-        return IconMatch(0.9 if frame.any() else 0.0, 5, 5, 4, 1.0)
+        r = region or FULL  # the bobber's icon is in the middle of the window
+        seen = frame.any() and r.left <= 0.5 <= r.right and r.top <= 0.5 <= r.bottom
+        return IconMatch(0.9 if seen else 0.0, 5, 5, 4, 1.0)
 
     def press_key(self, key: str, hold_s: float) -> None:
         self.pressed.append((self.t, key, hold_s))
@@ -622,7 +628,8 @@ def _fish(
     )  # fmt: skip
     while pond.t < minutes * 60 and engine.state is not State.STOPPED:
         engine.step()
-    return pond, [describe(e) for e in engine.events.queue]
+    pond.events = list(engine.events.queue)
+    return pond, [describe(e) for e in pond.events]
 
 
 def test_fishing_loop_varies_its_rhythm_only_when_asked():
@@ -695,7 +702,7 @@ def test_icon_is_measured_only_once_the_bobber_can_be_there():
     asked: list[float] = []
 
     def fish(pond: _Pond) -> list[str]:
-        def measure(frame, *, match_width):
+        def measure(frame, **_):
             asked.append(pond.t - pond.cast_at)
             found = bool(frame.any())
             return Calibration(
@@ -714,6 +721,100 @@ def test_icon_is_measured_only_once_the_bobber_can_be_there():
     lines = fish(pond)
     assert not any(line.startswith("Measured") for line in lines)
     assert any(line.startswith("No gear icon") for line in lines)
+
+
+def test_gear_is_looked_for_only_inside_the_search_zone():
+    """The search zone limits where a gear is found. Measuring the gear's size finds one inside
+    the zone, where it is, and none outside it; so does the engine cast by cast. Dragging the
+    zone cannot take it out of the window or below its smallest size."""
+    templates = load_icon_templates()
+    frame = np.full((540, 960, 3), (90, 60, 30), np.uint8)  # BGR: bluish water
+    frame += np.random.default_rng(0).integers(0, 20, frame.shape, dtype=np.uint8)
+    t = template_for_size(templates, 42)
+    frame[150:192, 200:242][t.mask > 0] = t.bgr[t.mask > 0]
+    done: list[float] = []
+
+    def scan(within: Region) -> Calibration:
+        return calibrate_icon_scale(
+            frame, templates, sizes=range(30, 56), zone=within, progress=lambda d, _: done.append(d)
+        )
+
+    inside = scan(Region(0.1, 0.15, 0.4, 0.5))
+    assert inside.valid and abs(inside.icon_size_px - 42) <= 2
+    assert abs(inside.x - 221) <= 2 and abs(inside.y - 171) <= 2
+    assert done == sorted(done) and done[-1] == pytest.approx(1.0)  # how far along it is
+    assert not scan(Region(0.5, 0.5, 0.8, 0.9)).valid
+
+    measured_in: list[Region] = []
+
+    def measure(frame, *, zone, **_):
+        measured_in.append(zone)
+        return Calibration(icon_size_px=40, score=0.0, x=5, y=5)
+
+    _, lines = _fish(BehaviorConfig(), 1, zone=Region(0.3, 0.3, 0.8, 0.8), calibrate=measure)
+    assert any(line.startswith("Caught") for line in lines)
+    off = Region(0.0, 0.0, 0.4, 0.4)  # the pond's bobber is in the middle of the window
+    pond, _ = _fish(BehaviorConfig(), 1, zone=off, calibrate=measure)
+    assert not any(k == "f" for _, k, _ in pond.pressed)
+    assert measured_in and set(measured_in) == {off}
+
+    assert zone.resize(FULL, "se", -0.5, 2.0) == Region(0.0, 0.0, zone.MIN_SIDE, 1.0)
+    moved = zone.pan(Region(0.2, 0.2, 0.5, 0.6), 0.9, -0.9)
+    assert (moved.left, moved.top, moved.right, moved.bottom) == pytest.approx((0.7, 0, 1, 0.4))
+
+
+def test_scan_slower_than_the_icon_timeout_says_to_shrink_the_zone():
+    """When not one scan for the gear finishes inside the icon timeout, the miss says so and
+    says what helps: a smaller icon detection zone. A scan that finishes in time and finds
+    nothing is a plain miss."""
+
+    def fish(scan_s: float) -> list[str]:
+        pond = _Pond()
+
+        def measure(frame, **_):
+            pond.sleep(scan_s)
+            return Calibration(icon_size_px=40, score=0.0, x=5, y=5)
+
+        off = Region(0.0, 0.0, 0.4, 0.4)  # the bobber is outside it: nothing is ever found
+        lines = _fish(BehaviorConfig(), 0.5, pond=pond, zone=off, calibrate=measure)[1]
+        return [line for line in lines if line.startswith("No gear icon within")]
+
+    slow, quick = fish(6.0), fish(0.5)
+    assert slow and all("shrink" in line for line in slow)
+    assert quick and not any("shrink" in line for line in quick)
+
+
+def test_live_picture_comes_at_its_pace_even_during_a_scan():
+    """Asked for a picture every 0.2 s, the engine sends the window about five times a second:
+    between casts too, with a box around the gear while it follows one. A scan for the gear's
+    size holds the loop for seconds; the pictures still come, with how far the scan is and a box
+    at its best match so far. Not asked, it sends none."""
+
+    def pictures(pond: _Pond) -> list[ev.Preview]:
+        previews = [e for e in pond.events if isinstance(e, ev.Preview)]
+        assert max(b.t - a.t for a, b in itertools.pairwise(previews)) < 0.5
+        return previews
+
+    pond, _ = _fish(BehaviorConfig(), 0.2, pond=_Pond(bite_after_s=3))
+    assert not any(isinstance(e, ev.Preview) for e in pond.events)
+
+    pond, _ = _fish(BehaviorConfig(), 1, pond=_Pond(bite_after_s=3), preview_s=0.2)
+    previews = pictures(pond)
+    assert any(p.box and p.score is None for p in previews)  # the followed gear
+    assert any(p.box is None for p in previews)
+
+    pond = _Pond()
+
+    def measure(frame, *, progress, **_):
+        for i in range(1, 51):  # a 5 s scan in 50 steps
+            pond.sleep(0.1)
+            progress(i / 50, IconMatch(0.4, 6, 6, 4, 1.0))
+        return Calibration(icon_size_px=4, score=0.4, x=6, y=6)
+
+    off = Region(0.0, 0.0, 0.4, 0.4)  # the bobber is outside it, so the size gets scanned for
+    _fish(BehaviorConfig(), 0.1, pond=pond, zone=off, calibrate=measure, preview_s=0.2)
+    scanning = [p for p in pictures(pond) if p.scan is not None]
+    assert len(scanning) > 10 and all(p.box and p.score is not None for p in scanning)
 
 
 def test_background_fishing_borrows_focus_and_gives_it_back():

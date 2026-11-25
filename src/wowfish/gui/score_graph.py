@@ -26,7 +26,7 @@ class ScoreGraph:
         import tkinter as tk
         import tkinter.font as tkfont
 
-        self.canvas = tk.Canvas(parent, background=SURFACE, highlightthickness=0, height=280)
+        self.canvas = tk.Canvas(parent, background=SURFACE, highlightthickness=0, height=160)
         self._font = tkfont.Font(font=FONT)  # sizes come from the font: HiDPI scales it
         self._lh = self._font.metrics("linespace")
         self._trace: ScoreTrace | None = None
