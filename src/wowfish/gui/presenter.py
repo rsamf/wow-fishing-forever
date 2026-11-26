@@ -255,12 +255,12 @@ class Presenter:
                 if isinstance(event, ev.Scores):  # the graph's feed: not a log line
                     self._add_scores(event)
                     continue
-                if isinstance(event, ev.Preview):  # the live picture: only the newest is shown
-                    self.preview = event
-                    continue
                 lines.append(describe(event))
                 logger.debug(lines[-1])
                 self._apply(event)
+            newest = getattr(self._thread.engine, "preview", None)  # the live picture's slot
+            if newest is not None:
+                self.preview = newest
             if not self._thread.is_alive() and q.empty():
                 self._thread = None
         if self.preview is not None and self.preview.scan is not None and not self.running:

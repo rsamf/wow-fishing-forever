@@ -18,6 +18,14 @@ GOLD_MIN = 0.12  # masked mean of (R - B) / 255; the gold sprite is ~0.3, the gr
 MIN_TEMPLATE_PX = 12
 
 
+def shrunk(frame: np.ndarray, scale: float) -> np.ndarray:
+    """`frame` scaled by `scale` when that is below 1; the frame itself otherwise."""
+    if scale >= 1.0:
+        return frame
+    size = (max(1, round(frame.shape[1] * scale)), max(1, round(frame.shape[0] * scale)))
+    return cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
+
+
 @dataclass(frozen=True)
 class IconMatch:
     score: float  # TM_CCOEFF_NORMED in [-1, 1]; NO_MATCH when the crop is too small
@@ -61,9 +69,7 @@ class IconMatcher:
         x0, y0, x1, y1 = (region or FULL).to_box(w, h)
         crop = np.ascontiguousarray(frame_bgr[y0:y1, x0:x1])
         scale = min(1.0, self.match_width / ref_w)
-        if scale < 1.0:
-            size = (max(1, round(crop.shape[1] * scale)), max(1, round(crop.shape[0] * scale)))
-            crop = cv2.resize(crop, size, interpolation=cv2.INTER_AREA)
+        crop = shrunk(crop, scale)
         if crop.shape[0] < tsize or crop.shape[1] < tsize:
             return IconMatch(NO_MATCH, -1, -1, self.template.size, 0.0)
         t = self._template(tsize)

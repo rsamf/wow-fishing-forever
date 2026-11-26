@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def clamp(v: float, lo: float, hi: float) -> float:
+    return min(max(v, lo), hi)
+
+
 @dataclass(frozen=True)
 class Region:
     left: float
@@ -28,7 +32,7 @@ class Region:
     @classmethod
     def around(cls, x: int, y: int, width: int, height: int, margin: float = 0.10) -> Region:
         """A box of ±margin (fraction of the frame) around pixel (x, y), clamped to the frame."""
-        fx, fy = min(max(x / width, 0.0), 1.0), min(max(y / height, 0.0), 1.0)
+        fx, fy = clamp(x / width, 0.0, 1.0), clamp(y / height, 0.0, 1.0)
         return cls(
             max(0.0, fx - margin),
             max(0.0, fy - margin),

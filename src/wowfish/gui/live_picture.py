@@ -10,7 +10,7 @@ from typing import Any
 from wowfish.capture import Box
 from wowfish.engine.events import Preview
 from wowfish.gui import image, zone
-from wowfish.gui.score_graph import MUTED, SURFACE
+from wowfish.gui.score_graph import FONT, GRID, MUTED, SURFACE
 from wowfish.vision.region import Region
 
 WIDTH, HEIGHT = 640, 360  # the size asked for; the layout gives more as the window grows
@@ -19,7 +19,6 @@ ZONE_STOPPED = "#9aa0a6"  # grey: the bot is stopped and the zone cannot be drag
 ZONE_NAME = "Icon detection zone"
 GEAR_COLOR = "#00c800"  # the gear the bot is following
 MATCH_COLOR = "#ff8c00"  # the best match so far, while it is still looking
-SCAN_TRACK = "#6c757d"  # the scan bar's unfilled part
 SCAN_BAR = 6  # px height of the scan bar along the zone's bottom edge
 HANDLE = 12  # px side of a corner handle
 GRAB = 14  # px around a corner that still takes hold of it
@@ -46,7 +45,7 @@ class LivePicture:
         self._resize: str | None = None  # the pending redraw after a resize, if any
         self._image = self.canvas.create_image(0, 0, anchor="nw")
         self._note = self.canvas.create_text(
-            WIDTH // 2, HEIGHT // 2, text="No picture yet. Press Start.", fill=MUTED
+            WIDTH // 2, HEIGHT // 2, text="No picture yet. Press Start.", fill=MUTED, font=FONT
         )
         self.canvas.bind("<Configure>", self._resized)
         self.canvas.bind("<ButtonPress-1>", self._press)
@@ -110,19 +109,19 @@ class LivePicture:
         if scan is not None:
             y = y1 - SCAN_BAR - 2
             xa, xb = x0 + HANDLE + 4, x1 - HANDLE - 4  # between the corner handles
-            c.create_rectangle(xa, y, xb, y + SCAN_BAR, fill=SCAN_TRACK, outline="", tags="mark")
+            c.create_rectangle(xa, y, xb, y + SCAN_BAR, fill=GRID, outline="", tags="mark")
             c.create_rectangle(
                 xa, y, xa + round((xb - xa) * scan), y + SCAN_BAR,
                 fill=color, outline="", tags="mark",
             )  # fmt: skip
             c.create_text(
-                xa + 2, y - 4, anchor="sw", fill=color, tags="mark",
+                xa + 2, y - 4, anchor="sw", fill=color, tags="mark", font=FONT,
                 text=f"Scanning the zone for the gear: {scan:.0%}",
             )  # fmt: skip
         if self._named:
             c.create_text(
                 (x0 + x1) // 2, y0 + 8, anchor="n", text=ZONE_NAME, fill=color, tags="mark",
-                font=("TkDefaultFont", 11, "bold"),
+                font=(*FONT, "bold"),
             )  # fmt: skip
         if self._preview.box is not None:
             k = w / self._preview.frame.shape[1]  # frame pixels -> drawn pixels
@@ -136,7 +135,7 @@ class LivePicture:
             if score is not None:
                 c.create_text(
                     px + bx - 2, py + by - 6, anchor="sw", text=f"{score:.2f}", fill=color,
-                    tags="mark",
+                    tags="mark", font=FONT,
                 )  # fmt: skip
 
     def _name(self, show: bool) -> None:

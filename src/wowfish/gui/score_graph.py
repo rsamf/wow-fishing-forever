@@ -6,6 +6,7 @@ from typing import Any
 
 from wowfish.assets import CLIP_NAMES
 from wowfish.gui.presenter import ScoreTrace
+from wowfish.vision.region import clamp
 
 # One colour per clip, fixed in CLIP_NAMES order. Validated as a set on the bootstrap-dark
 # surface (all checks pass; worst adjacent colour-blind separation dE 8.4, inside the band that
@@ -49,12 +50,12 @@ class ScoreGraph:
     def _x(self, t: float) -> float:
         assert self._box is not None
         x0, x1, _, _ = self._box
-        return x0 + (x1 - x0) * min(max(t / self._span, 0.0), 1.0)
+        return x0 + (x1 - x0) * clamp(t / self._span, 0.0, 1.0)
 
     def _y(self, score: float) -> float:
         assert self._box is not None
         _, _, y0, y1 = self._box
-        return y1 - (y1 - y0) * min(max(score, 0.0), 1.0)
+        return y1 - (y1 - y0) * clamp(score, 0.0, 1.0)
 
     def _ticks(self) -> list[float]:
         step = 5.0 if self._span > 10 else 1.0

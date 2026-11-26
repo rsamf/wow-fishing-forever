@@ -35,10 +35,11 @@ class Calibrated(Event):
 
 
 @dataclass(frozen=True)
-class Preview(Event):
-    """The game window as the bot sees it, every `preview_s`, for the GUI's live picture (not
-    logged)."""
+class Preview:
+    """The game window as the bot sees it, for the GUI's live picture. Not an event: the engine
+    keeps only the newest in `FishingEngine.preview`."""
 
+    t: float
     frame: np.ndarray  # the whole window, <= PREVIEW_WIDTH px wide, BGR
     # x, y, w, h in `frame` pixels: the gear being followed, or, while one is looked for, the
     # best match so far; None when there is neither

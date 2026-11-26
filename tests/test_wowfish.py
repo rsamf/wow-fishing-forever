@@ -533,13 +533,21 @@ class _Pond:
         self.pressed: list[tuple[float, str, float]] = []  # time, key, hold
         self.bites: list[float] = []
         self.cleared: list[float] = []  # when the engine dropped the buffered audio
-        self.events: list[ev.Event] = []  # everything the engine said, filled in by _fish
+        self.engine: FishingEngine | None = None  # set by _fish
+        self.previews: list[ev.Preview] = []  # each live picture seen in the engine's slot
 
     def clock(self) -> float:
         return self.t
 
     def sleep(self, s: float) -> None:
         self.t += s
+        self._look()
+
+    def _look(self) -> None:
+        """Note the engine's live picture whenever time moves, as a GUI polling it would."""
+        newest = self.engine.preview if self.engine else None
+        if newest is not None and (not self.previews or newest is not self.previews[-1]):
+            self.previews.append(newest)
 
     def open(self, window) -> None:
         self.opened.append(window)
@@ -592,6 +600,7 @@ class _Pond:
 
     def read(self, n: int) -> np.ndarray:
         self.t += 0.01
+        self._look()
         return np.zeros(n, np.float32)
 
     def clear(self) -> int:
@@ -626,10 +635,10 @@ def _fish(
         refresh_window=pond.refresh, clock=pond.clock, sleep=pond.sleep, rng=random.Random(7),
         **{"matcher": pond, **engine_args},
     )  # fmt: skip
+    pond.engine = engine
     while pond.t < minutes * 60 and engine.state is not State.STOPPED:
         engine.step()
-    pond.events = list(engine.events.queue)
-    return pond, [describe(e) for e in pond.events]
+    return pond, [describe(e) for e in engine.events.queue]
 
 
 def test_fishing_loop_varies_its_rhythm_only_when_asked():
@@ -785,18 +794,17 @@ def test_scan_slower_than_the_icon_timeout_says_to_shrink_the_zone():
 
 
 def test_live_picture_comes_at_its_pace_even_during_a_scan():
-    """Asked for a picture every 0.2 s, the engine sends the window about five times a second:
+    """Asked for a picture every 0.2 s, the engine puts up a new one about five times a second:
     between casts too, with a box around the gear while it follows one. A scan for the gear's
     size holds the loop for seconds; the pictures still come, with how far the scan is and a box
-    at its best match so far. Not asked, it sends none."""
+    at its best match so far. Not asked, it puts up none."""
 
     def pictures(pond: _Pond) -> list[ev.Preview]:
-        previews = [e for e in pond.events if isinstance(e, ev.Preview)]
-        assert max(b.t - a.t for a, b in itertools.pairwise(previews)) < 0.5
-        return previews
+        assert max(b.t - a.t for a, b in itertools.pairwise(pond.previews)) < 0.5
+        return pond.previews
 
     pond, _ = _fish(BehaviorConfig(), 0.2, pond=_Pond(bite_after_s=3))
-    assert not any(isinstance(e, ev.Preview) for e in pond.events)
+    assert pond.previews == []
 
     pond, _ = _fish(BehaviorConfig(), 1, pond=_Pond(bite_after_s=3), preview_s=0.2)
     previews = pictures(pond)

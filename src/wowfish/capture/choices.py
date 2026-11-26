@@ -117,17 +117,13 @@ def _snapshot(window: WindowRef) -> np.ndarray | None:
 def window_snapshot(window: WindowRef, width: int = 240) -> np.ndarray | None:
     """What the window shows now, as BGR at most `width` px wide; None when it cannot be had
     (minimized, on another workspace, no permission), which the picker shows as a placeholder."""
-    import cv2
+    from wowfish.vision.matcher import shrunk
 
     try:
         frame = _snapshot(window)
         if frame is None or frame.size == 0:
             return None
-        h, w = frame.shape[:2]
-        if w > width:
-            size = (width, max(1, round(h * width / w)))
-            frame = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
-        return frame
+        return shrunk(frame, width / frame.shape[1])
     except Exception:
         return None
 

@@ -9,7 +9,6 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-import cv2
 import numpy as np
 
 from wowfish.audio import AudioChunk
@@ -27,7 +26,7 @@ from wowfish.config import Config
 from wowfish.engine import events as ev
 from wowfish.engine.behavior import Behavior
 from wowfish.engine.state import State
-from wowfish.vision.matcher import ICON_THRESHOLD, IconMatch
+from wowfish.vision.matcher import ICON_THRESHOLD, IconMatch, shrunk
 from wowfish.vision.region import FULL, Region
 from wowfish.vision.search import IconSearch
 
@@ -86,7 +85,10 @@ class FishingEngine:
         self.search = IconSearch(self.matcher, self.threshold) if self.matcher else None
         self._sweeping = True
         self.zone = zone  # where a new gear is looked for; the GUI narrows it while running
-        self.preview_s = preview_s  # send the window as a Preview this often; 0 = never
+        # The live picture: the newest one only, replaced every `preview_s` (0 = never). Whoever
+        # shows it reads this; pictures are not events and never queue up.
+        self.preview: ev.Preview | None = None
+        self.preview_s = preview_s
         self._last_preview = -math.inf
         self._candidate: IconMatch | None = None  # while a gear is looked for: the best match yet
         self._scan_s = 0.0  # this cast's longest scan for the gear's size
@@ -582,7 +584,7 @@ class FishingEngine:
     def _maybe_preview(
         self, now: float, frame: np.ndarray | None = None, scan: float | None = None
     ) -> None:
-        """Send the live picture when one is due: `frame` when the caller has just grabbed one,
+        """Replace the live picture when one is due: `frame` when the caller has just grabbed one,
         else a grab of its own. `scan` is how far a scan of `frame` is. A grab that fails only
         skips a beat here: the loop's own grabs report what is wrong."""
         if not self.preview_s or now - self._last_preview < self.preview_s:
@@ -593,11 +595,8 @@ class FishingEngine:
                 frame = self.capturer.grab()
             except Exception:
                 return
-        h, w = frame.shape[:2]
-        scale = min(1.0, PREVIEW_WIDTH / w)
-        if scale < 1.0:
-            size = (round(w * scale), round(h * scale))
-            frame = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
+        scale = min(1.0, PREVIEW_WIDTH / frame.shape[1])
+        frame = shrunk(frame, scale)
         box = score = None
         if self._icon_xy is not None:
             x, y, side = *self._icon_xy, self._icon_size
@@ -614,7 +613,7 @@ class FishingEngine:
                 side,
                 side,
             )
-        self._emit(ev.Preview(self._t(), frame, box, score, scan))
+        self.preview = ev.Preview(self._t(), frame, box, score, scan)
 
     def _drain_audio(self, now: float) -> list[AudioChunk]:
         rate = self.audio.sample_rate
