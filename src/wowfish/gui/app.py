@@ -10,6 +10,7 @@ from wowfish.gui.presenter import Presenter
 from wowfish.gui.setup_page import SetupPage
 
 POLL_MS = 50
+DEFAULT_SIZE = (1200, 900)  # the window's size at launch, at 96 dpi
 
 
 class App:
@@ -28,6 +29,13 @@ class App:
         nb.add(self.fish.frame, text="Fish")
         if not self.p.prerequisites():
             nb.select(1)
+        # Open larger than the least the widgets ask for, so the game view has room. Sizes are
+        # for a 96 dpi screen and grow with the display's scaling.
+        self.root.update_idletasks()
+        scale = self.root.winfo_fpixels("1i") / 96
+        width = max(self.root.winfo_reqwidth(), round(DEFAULT_SIZE[0] * scale))
+        height = max(self.root.winfo_reqheight(), round(DEFAULT_SIZE[1] * scale))
+        self.root.geometry(f"{width}x{height}")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self._after = self.root.after(POLL_MS, self._tick)
 

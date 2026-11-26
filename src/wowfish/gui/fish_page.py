@@ -6,13 +6,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from wowfish.gui.live_picture import LivePicture
+from wowfish.gui.live_picture import WIDTH, LivePicture
 from wowfish.gui.presenter import Presenter, View
 from wowfish.gui.score_graph import ScoreGraph
 from wowfish.gui.window_picker import pick_window
 
 ZONE_NOTE = (
-    "Do not move or zoom the camera. Shrinking the icon detection zone finds the gear faster"
+    "Ensure that the gear icon is positioned inside the yellow zone by looking at the water "
+    "where the bobber will land, and then, don't move your camera. Shrinking the icon detection "
+    "zone finds the gear faster. You can shrink it by dragging the corners."
 )
 
 LEFT_SHARE, RIGHT_SHARE = 3, 2  # how extra window width is split: picture side, log side
@@ -58,9 +60,14 @@ class FishPage:
         self.blockers.pack(side="left", padx=6)
         self.picture = LivePicture(left, self.p.set_zone, self.p.zone)
         self.picture.canvas.grid(row=1, column=0, sticky="nsew")
-        tb.Label(left, text=ZONE_NOTE, bootstyle="warning", anchor="center", justify="center").grid(
-            row=2, column=0, sticky="ew", pady=(4, 8)
-        )
+        # The note wraps at the column's width, whatever the window's size. It asks for little
+        # width itself, so a long note never widens the window.
+        note = tb.Label(
+            left, text=ZONE_NOTE, bootstyle="warning", anchor="center", justify="center",
+            width=STATUS_CHARS, wraplength=WIDTH,
+        )  # fmt: skip
+        note.grid(row=2, column=0, sticky="ew", pady=(4, 8))
+        left.bind("<Configure>", lambda e: note.configure(wraplength=max(e.width - 4, 100)))
         self.graph = ScoreGraph(left)
         self.graph.canvas.grid(row=3, column=0, sticky="nsew")
 
