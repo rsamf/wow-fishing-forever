@@ -52,6 +52,10 @@ class GameConfig:
     lure_key: str = ""
     # How long the lure lasts; it is put on again once this has passed.
     lure_minutes: float = 10.0
+    # Optional periodic macro keybind (e.g. open boxes or shells). "" = off.
+    macro_key: str = ""
+    # How often to press macro_key, in minutes.
+    macro_minutes: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,7 @@ class RunConfig:
     pause_max_s: float = 2.0
     key_hold_ms: int = 60
     lure_cast_s: float = 6.0
+    macro_wait_s: float = 1.5
     background: bool = False  # fish while another window has focus, borrowing it per fish
 
 
@@ -264,6 +269,9 @@ def _validate(path: Path, cfg: Config) -> None:
     lk = cfg.game.lure_key
     check(not lk or is_supported_key(lk), "game.lure_key", "must be empty or a supported key name")
     check(cfg.game.lure_minutes > 0, "game.lure_minutes", "must be positive")
+    mk = cfg.game.macro_key
+    check(not mk or is_supported_key(mk), "game.macro_key", "must be empty or a supported key name")
+    check(cfg.game.macro_minutes > 0, "game.macro_minutes", "must be positive")
     v, a = cfg.vision, cfg.audio
     check(v.match_width >= 320, "vision.match_width", "must be at least 320")
     check(0.0 < a.bite_threshold <= 1.0, "audio.bite_threshold", "must be in (0, 1]")
@@ -275,6 +283,7 @@ def _validate(path: Path, cfg: Config) -> None:
     check(r.pause_min_s >= 0, "run.pause_min_s", "must be 0 or positive")
     check(r.pause_min_s <= r.pause_max_s, "run.pause_min_s", "must not exceed run.pause_max_s")
     check(r.lure_cast_s >= 0, "run.lure_cast_s", "must be 0 or positive")
+    check(r.macro_wait_s >= 0, "run.macro_wait_s", "must be 0 or positive")
     check(10 <= r.key_hold_ms <= 500, "run.key_hold_ms", "must be between 10 and 500")
     b = cfg.behavior
     for lo, hi in (

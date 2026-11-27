@@ -42,6 +42,8 @@ def describe(event: ev.Event) -> str:
             return f"Pressed {key} to quit the game"
         case ev.KeyPressed(key=key, why="lure"):
             return f"Pressed {key} to put the lure on"
+        case ev.KeyPressed(key=key, why="macro"):
+            return f"Pressed {key} for periodic macro"
         case ev.KeyPressed(key=key):
             return f"Pressed {key} to interact"
         case ev.Caught():
@@ -128,16 +130,41 @@ class Presenter:
         self.cfg = load_config()[0]
 
     def save_keys(
-        self, cast_key: str, interact_key: str, quit_key: str = "", lure_key: str = ""
+        self,
+        cast_key: str,
+        interact_key: str,
+        quit_key: str = "",
+        lure_key: str = "",
+        macro_key: str = "",
+        macro_minutes: str | float | None = None,
     ) -> None:
         cast, interact = keys.normalize_key(cast_key), keys.normalize_key(interact_key)
         quit_, lure = keys.normalize_key(quit_key), keys.normalize_key(lure_key)  # "" = none
-        for name in (cast, interact, *(k for k in (quit_, lure) if k)):
+        macro = keys.normalize_key(macro_key)  # "" = off
+        for name in (cast, interact, *(k for k in (quit_, lure, macro) if k)):
             if not keys.is_supported_key(name):
                 raise ValueError(f"unsupported key {name!r}: use a letter, digit, F1-F12, or space")
         self.reload()
+        minutes = self.cfg.game.macro_minutes
+        if macro_minutes is not None:
+            raw = str(macro_minutes).strip()
+            if raw:
+                try:
+                    minutes = float(raw)
+                except ValueError:
+                    raise ValueError(f"macro interval {raw!r} is not a number") from None
+                if minutes <= 0:
+                    raise ValueError("macro interval must be greater than 0 minutes")
+            else:
+                minutes = 1.0
         game = replace(
-            self.cfg.game, cast_key=cast, interact_key=interact, quit_key=quit_, lure_key=lure
+            self.cfg.game,
+            cast_key=cast,
+            interact_key=interact,
+            quit_key=quit_,
+            lure_key=lure,
+            macro_key=macro,
+            macro_minutes=minutes,
         )
         save_config(replace(self.cfg, game=game))
         self.reload()

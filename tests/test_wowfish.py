@@ -921,3 +921,34 @@ def test_lure_is_put_on_first_and_renewed_when_it_runs_out():
     assert "Pressed 3 to put the lure on" in lines
     pond, _ = _fish(BehaviorConfig(), 200 / 60)
     assert "3" not in {k for _, k, _ in pond.pressed}
+
+
+def test_periodic_macro_key_fires_on_interval_and_persists(tmp_path, monkeypatch):
+    """With a periodic macro key set, the bot casts first and presses the macro between casts
+    once macro_minutes have passed (and again every macro_minutes), waiting macro_wait_s before
+    casting again. Without a macro key it never presses one. Presenter validates and saves both."""
+    game = GameConfig(macro_key="4", macro_minutes=1.0)
+    pond, lines = _fish(BehaviorConfig(), 200 / 60, game)
+    macros = [t for t, key, _ in pond.pressed if key == "4"]
+    assert pond.pressed[0][1] == "1"  # casts first; macro waits until the first interval passes
+    assert len(macros) >= 2 and macros[0] >= 60.0
+    for before, after in itertools.pairwise(macros):
+        assert 60.0 <= after - before <= 60.0 + RunConfig().macro_wait_s + 10.0, macros
+    assert "Pressed 4 for periodic macro" in lines
+
+    pond_slow, _ = _fish(BehaviorConfig(), 200 / 60, GameConfig(macro_key="4", macro_minutes=2.0))
+    slow_macros = [t for t, key, _ in pond_slow.pressed if key == "4"]
+    assert len(slow_macros) == 1 and slow_macros[0] >= 120.0
+
+    pond_off, _ = _fish(BehaviorConfig(), 200 / 60)
+    assert "4" not in {k for _, k, _ in pond_off.pressed}
+
+    monkeypatch.setenv("WOWFISH_HOME", str(tmp_path))
+    p = Presenter()
+    p.save_keys("1", "f", macro_key="4", macro_minutes="10")
+    assert (p.cfg.game.macro_key, p.cfg.game.macro_minutes) == ("4", 10.0)
+    p.save_keys("1", "f", macro_key="4", macro_minutes="")
+    assert p.cfg.game.macro_minutes == 1.0
+    for bad in ("0", "-2", "abc"):
+        with pytest.raises(ValueError):
+            p.save_keys("1", "f", macro_key="4", macro_minutes=bad)

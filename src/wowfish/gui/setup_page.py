@@ -22,6 +22,10 @@ LURE_HINT = (
     "Optional. A macro like /use Shiny Bauble + /use 16 that puts a lure on the pole; it is "
     "pressed before the first cast and again whenever the lure runs out. Empty = no lure."
 )
+MACRO_HINT = (
+    "Optional. Pressed periodically between casts (e.g. a macro to open boxes or shells). "
+    "Empty = off."
+)
 
 HELP_WRAP_PX = 420
 
@@ -81,6 +85,17 @@ class SetupPage:
         self.lure.grid(row=1, column=1, padx=6, pady=(6, 0))
         tb.Label(keys_row, text=LURE_HINT, wraplength=420, justify="left").grid(
             row=1, column=2, columnspan=6, sticky="w", pady=(6, 0)
+        )
+        tb.Label(keys_row, text="Macro key").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.macro = tb.Entry(keys_row, width=8)
+        self.macro.insert(0, presenter.cfg.game.macro_key)
+        self.macro.grid(row=2, column=1, padx=6, pady=(6, 0))
+        tb.Label(keys_row, text="Every (min)").grid(row=2, column=2, sticky="w", pady=(6, 0))
+        self.macro_minutes = tb.Entry(keys_row, width=8)
+        self.macro_minutes.insert(0, f"{presenter.cfg.game.macro_minutes:g}")
+        self.macro_minutes.grid(row=2, column=3, padx=6, pady=(6, 0))
+        tb.Label(keys_row, text=MACRO_HINT, wraplength=340, justify="left").grid(
+            row=2, column=4, columnspan=4, sticky="w", pady=(6, 0)
         )
 
         limit = tb.Labelframe(f, text="Time limit", padding=8)
@@ -157,7 +172,16 @@ class SetupPage:
 
     def _save_keys(self) -> None:
         try:
-            self.p.save_keys(self.cast.get(), self.interact.get(), self.quit.get(), self.lure.get())
+            self.p.save_keys(
+                self.cast.get(),
+                self.interact.get(),
+                self.quit.get(),
+                self.lure.get(),
+                self.macro.get(),
+                self.macro_minutes.get(),
+            )
+            self.macro_minutes.delete(0, "end")
+            self.macro_minutes.insert(0, f"{self.p.cfg.game.macro_minutes:g}")
             self.keys_note.configure(text="saved")
         except ValueError as e:
             self.keys_note.configure(text=str(e))
