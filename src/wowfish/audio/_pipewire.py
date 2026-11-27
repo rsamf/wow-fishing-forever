@@ -130,6 +130,7 @@ class PipewireAppSource:
         *,
         sample_rate: int = 22050,
         blocksize: int = 1024,
+        raw: bool = False,
         command: Sequence[str] | None = None,
     ) -> None:
         self.serial = serial
@@ -137,14 +138,26 @@ class PipewireAppSource:
         self.name = f"{app_name} (game audio only)"
         self.sample_rate = sample_rate
         self.blocksize = blocksize
+        self.raw = raw
         self.command = list(command) if command is not None else self._default_command()
         self._proc: subprocess.Popen[bytes] | None = None
 
     def _default_command(self) -> list[str]:
-        return [
-            PW_RECORD, "--target", str(self.serial), "--rate", str(self.sample_rate),
-            "--channels", "1", "--format", "f32", "--raw", "-",
-        ]  # fmt: skip
+        cmd = [
+            PW_RECORD,
+            "--target",
+            str(self.serial),
+            "--rate",
+            str(self.sample_rate),
+            "--channels",
+            "1",
+            "--format",
+            "f32",
+        ]
+        if self.raw:
+            cmd.append("--raw")
+        cmd.append("-")
+        return cmd  # fmt: skip
 
     def __enter__(self) -> PipewireAppSource:
         try:
@@ -192,6 +205,7 @@ def open_app_stream(
     *,
     sample_rate: int = 22050,
     blocksize: int = 1024,
+    raw: bool = False,
     dump: Callable[[], str] | None = None,
 ) -> PipewireAppSource:
     """Capture the audio of the app that owns `window`."""
@@ -211,5 +225,5 @@ def open_app_stream(
             "Make it play a sound and try again"
         )
     return PipewireAppSource(
-        stream.serial, stream.name, sample_rate=sample_rate, blocksize=blocksize
+        stream.serial, stream.name, sample_rate=sample_rate, blocksize=blocksize, raw=raw
     )

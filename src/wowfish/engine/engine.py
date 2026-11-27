@@ -765,7 +765,7 @@ def build_engine(
         window,
         capturer=get_capturer(window, own_pixels=cfg.run.background),
         input_device=get_input_device(window),
-        audio_source=ThreadedSource(open_game_audio(window, cfg.audio.device)),
+        audio_source=ThreadedSource(open_game_audio(window, cfg.audio.device, raw=cfg.audio.raw)),
         detector=detector,
         matcher_factory=matcher_factory,
         refresh_window=refresh_window,

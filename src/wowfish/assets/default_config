@@ -32,6 +32,9 @@ device = ""
 bite_threshold = 0.66
 # Ignore further bites for this many seconds after one fires.
 refractory_s = 3.0
+# Linux only: pass --raw to pw-record. Not needed normally (the output is already raw float32);
+# add it back only if you hit a problem with plain capture.
+raw = false
 
 [run]
 # Recast if the gear icon is not seen this many seconds after casting.
